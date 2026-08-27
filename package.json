@@ -1,0 +1,30 @@
+{
+  "name": "com.storyloom.unity",
+  "version": "0.4.5",
+  "displayName": "Storyloom",
+  "description": "Runtime + editor kit for stories exported from Storyloom: loads the .unity.json, plays the graph (variables, choices, checks, inventory, events, discoverables), binds characters/items/locations to prefabs, validates, and generates a playable test scene in a top-down (Stardew-style), third-person or first-person style.",
+  "unity": "2021.3",
+  "author": {
+    "name": "Mondae Atughonu",
+    "url": "https://github.com/"
+  },
+  "license": "MIT",
+  "keywords": [
+    "narrative",
+    "dialogue",
+    "branching",
+    "story",
+    "storyloom"
+  ],
+  "dependencies": {
+    "com.unity.ugui": "1.0.0",
+    "com.unity.inputsystem": "1.7.0"
+  },
+  "samples": [
+    {
+      "displayName": "The Lantern Road (example story + minimal player)",
+      "description": "The sample project's Unity export plus a bare-bones uGUI player that uses only the runtime.",
+      "path": "Samples~/LanternRoad"
+    }
+  ]
+}

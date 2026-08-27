@@ -1,0 +1,820 @@
+{
+  "format": "storyloom-unity",
+  "version": 2,
+  "name": "The Lantern Road",
+  "startNodeId": "n1",
+  "variables": [
+    {
+      "name": "gold",
+      "type": "int",
+      "defaultValue": "12",
+      "tracked": true
+    },
+    {
+      "name": "guildRep",
+      "type": "int",
+      "defaultValue": "0",
+      "tracked": false
+    },
+    {
+      "name": "bramTrust",
+      "type": "int",
+      "defaultValue": "0",
+      "tracked": false
+    },
+    {
+      "name": "day",
+      "type": "int",
+      "defaultValue": "1",
+      "tracked": false
+    }
+  ],
+  "characters": [
+    {
+      "id": "c_wren",
+      "name": "Wren",
+      "description": "A guild courier carrying a sealed letter to the Hollow.",
+      "image": "",
+      "roleType": "protagonist",
+      "role": "Courier",
+      "speciesId": "s_human",
+      "factionId": "f_guild",
+      "homeLocationId": "l_hollow",
+      "traits": "quick, stubborn, owes money",
+      "motivation": "Deliver the letter before the guild notices it is late.",
+      "voice": "",
+      "relationships": [
+        {
+          "characterId": "c_maren",
+          "kind": "mentor",
+          "note": "Taught Wren the road"
+        },
+        {
+          "characterId": "c_bram",
+          "kind": "acquaintance",
+          "note": "Owes him ten gold"
+        }
+      ],
+      "voiceSamples": []
+    },
+    {
+      "id": "c_bram",
+      "name": "Warden Bram",
+      "description": "Keeps the night gate. Tired, bribable, but not stupid.",
+      "image": "",
+      "roleType": "antagonist",
+      "role": "Gatekeeper of Ashford",
+      "speciesId": "s_human",
+      "factionId": "f_watch",
+      "homeLocationId": "l_gate",
+      "traits": "weary, pragmatic",
+      "motivation": "Get through the night without an incident on his watch.",
+      "voice": "",
+      "relationships": [],
+      "voiceSamples": []
+    },
+    {
+      "id": "c_maren",
+      "name": "Elder Maren",
+      "description": "Lights the road lanterns each dawn. Remembers every courier who ever passed.",
+      "image": "",
+      "roleType": "mentor",
+      "role": "Lamplighter",
+      "speciesId": "s_human",
+      "factionId": "f_guild",
+      "homeLocationId": "l_road",
+      "traits": "kind, exacting",
+      "motivation": "Make sure no one walks the road unlit.",
+      "voice": "",
+      "relationships": [
+        {
+          "characterId": "c_wren",
+          "kind": "student",
+          "note": ""
+        }
+      ],
+      "voiceSamples": []
+    }
+  ],
+  "factions": [
+    {
+      "id": "f_guild",
+      "name": "Lantern Guild",
+      "description": "Couriers and lamplighters. Their seal opens doors.",
+      "image": "",
+      "kind": "guild",
+      "baseLocationId": "l_road",
+      "parentFactionId": "",
+      "goals": "Keep the roads moving at any hour."
+    },
+    {
+      "id": "f_watch",
+      "name": "Ashford Watch",
+      "description": "The town guard. Closes the gate at dusk.",
+      "image": "",
+      "kind": "military",
+      "baseLocationId": "l_gate",
+      "parentFactionId": "",
+      "goals": "Nothing leaves after dark."
+    }
+  ],
+  "species": [
+    {
+      "id": "s_human",
+      "name": "Human",
+      "description": "Ordinary folk of the realm.",
+      "image": "",
+      "kind": "race",
+      "traits": ""
+    },
+    {
+      "id": "s_marshlight",
+      "name": "Marsh-light",
+      "description": "Pale lights that drift over the marsh and lead the unlit astray.",
+      "image": "",
+      "kind": "spirit",
+      "traits": "silent, curious, hungry"
+    }
+  ],
+  "regions": [
+    {
+      "id": "r_realm",
+      "name": "The Eastern Realm",
+      "description": "Everything between the mountains and the sea.",
+      "image": "",
+      "kind": "kingdom",
+      "parentRegionId": ""
+    },
+    {
+      "id": "r_ashford",
+      "name": "Ashford",
+      "description": "A walled market town on the edge of the marsh.",
+      "image": "",
+      "kind": "town",
+      "parentRegionId": "r_realm"
+    },
+    {
+      "id": "r_marches",
+      "name": "The Marches",
+      "description": "Fen and causeway between Ashford and the coast.",
+      "image": "",
+      "kind": "region",
+      "parentRegionId": "r_realm"
+    }
+  ],
+  "locations": [
+    {
+      "id": "l_gate",
+      "name": "Ashford Gate",
+      "description": "Iron gate on the east wall, one brazier, one bored warden.",
+      "image": "",
+      "kind": "landmark",
+      "regionId": "r_ashford",
+      "region": "Ashford",
+      "atmosphere": "Cold, torchlit, echoing."
+    },
+    {
+      "id": "l_road",
+      "name": "Lantern Road",
+      "description": "A causeway over the marsh, lit by lanterns only at dawn.",
+      "image": "",
+      "kind": "wilderness",
+      "regionId": "r_marches",
+      "region": "The Marches",
+      "atmosphere": "Fog, frogs, the smell of peat."
+    },
+    {
+      "id": "l_hollow",
+      "name": "The Hollow",
+      "description": "A sunken village where the letter is bound.",
+      "image": "",
+      "kind": "place",
+      "regionId": "r_marches",
+      "region": "The Marches",
+      "atmosphere": "Quiet, damp, watchful."
+    }
+  ],
+  "items": [
+    {
+      "id": "i_seal",
+      "name": "Guild Seal",
+      "description": "A wax stamp of the Lantern Guild.",
+      "image": "",
+      "kind": "key item",
+      "effect": "Proves guild standing (guildRep ≥ 1).",
+      "startOwned": false,
+      "tracked": false
+    },
+    {
+      "id": "i_lantern",
+      "name": "Brass Lantern",
+      "description": "Maren's lantern. The only safe way across the marsh at night.",
+      "image": "",
+      "kind": "tool",
+      "effect": "Lights the road. Needed to pass the marsh check.",
+      "startOwned": false,
+      "tracked": false
+    }
+  ],
+  "lore": [
+    {
+      "id": "lo_curfew",
+      "name": "The dusk curfew",
+      "description": "No one passes the Ashford gate after dark without the watch's leave. Three couriers were lost to the marsh the year the rule was made.",
+      "image": "",
+      "kind": "rule"
+    },
+    {
+      "id": "lo_lights",
+      "name": "The marsh-lights",
+      "description": "Lamplighters say the marsh-lights are the unlit dead, still looking for the road.",
+      "image": "",
+      "kind": "myth"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "n1",
+      "type": "scene",
+      "title": "Ashford Gate at dusk",
+      "text": "The gate is already half-closed. Wren clutches the sealed letter; it was due at the Hollow yesterday.",
+      "speakerId": "c_wren",
+      "locationId": "l_gate",
+      "when": "Day 1 · Dusk",
+      "why": "Establish the deadline and the closed gate.",
+      "jumpToNodeId": "",
+      "characterIds": [
+        "c_wren"
+      ],
+      "factionIds": [
+        "f_watch"
+      ],
+      "itemIds": [],
+      "speciesIds": [],
+      "loreIds": [],
+      "textId": "T_n1",
+      "lines": [],
+      "status": "",
+      "labels": [],
+      "image": "",
+      "conditionMode": "all",
+      "conditions": [],
+      "effects": [],
+      "eventName": "",
+      "hostNodeId": "",
+      "discoverKind": "",
+      "options": [],
+      "links": [
+        {
+          "port": "out",
+          "toNodeId": "n2",
+          "label": "",
+          "conditionMode": "all",
+          "conditions": []
+        }
+      ]
+    },
+    {
+      "id": "n2",
+      "type": "dialogue",
+      "title": "Bram bars the way",
+      "text": "\"Road's closed after dark, courier. Marsh takes people who can't see their feet. Come back at dawn — or give me a reason.\"",
+      "speakerId": "c_bram",
+      "locationId": "l_gate",
+      "when": "Day 1 · Dusk",
+      "why": "Introduce Bram and the three ways through.",
+      "jumpToNodeId": "",
+      "characterIds": [
+        "c_bram",
+        "c_wren"
+      ],
+      "factionIds": [
+        "f_watch"
+      ],
+      "itemIds": [],
+      "speciesIds": [],
+      "loreIds": [],
+      "textId": "T_n2",
+      "lines": [
+        {
+          "speakerId": "c_bram",
+          "text": "\"Road's closed after dark, courier. Marsh takes people who can't see their feet.\"",
+          "emotion": "weary",
+          "stringId": "L_l1"
+        },
+        {
+          "speakerId": "c_wren",
+          "text": "\"It's already a day late, Bram.\"",
+          "emotion": "pleading",
+          "stringId": "L_l2"
+        },
+        {
+          "speakerId": "c_bram",
+          "text": "\"Then come back at dawn — or give me a reason.\"",
+          "emotion": "flat",
+          "stringId": "L_l3"
+        }
+      ],
+      "status": "",
+      "labels": [],
+      "image": "",
+      "conditionMode": "all",
+      "conditions": [],
+      "effects": [],
+      "eventName": "",
+      "hostNodeId": "",
+      "discoverKind": "",
+      "options": [],
+      "links": [
+        {
+          "port": "out",
+          "toNodeId": "n3",
+          "label": "",
+          "conditionMode": "all",
+          "conditions": []
+        }
+      ]
+    },
+    {
+      "id": "n3",
+      "type": "choice",
+      "title": "How do you get through?",
+      "text": "",
+      "speakerId": "",
+      "locationId": "l_gate",
+      "when": "Day 1 · Dusk",
+      "why": "First real player decision; each option costs something different.",
+      "jumpToNodeId": "",
+      "characterIds": [],
+      "factionIds": [],
+      "itemIds": [],
+      "speciesIds": [],
+      "loreIds": [],
+      "textId": "T_n3",
+      "lines": [],
+      "status": "",
+      "labels": [],
+      "image": "",
+      "conditionMode": "all",
+      "conditions": [],
+      "effects": [],
+      "eventName": "",
+      "hostNodeId": "",
+      "discoverKind": "",
+      "options": [
+        {
+          "id": "o_seal",
+          "label": "Show the guild seal",
+          "weight": 1,
+          "conditionMode": "all",
+          "conditions": [
+            {
+              "variable": "guildRep",
+              "op": ">=",
+              "value": "1"
+            }
+          ]
+        },
+        {
+          "id": "o_bribe",
+          "label": "Slip him some coin",
+          "weight": 1,
+          "conditionMode": "all",
+          "conditions": [
+            {
+              "variable": "gold",
+              "op": ">=",
+              "value": "10"
+            }
+          ]
+        },
+        {
+          "id": "o_wait",
+          "label": "Wait for dawn",
+          "weight": 1,
+          "conditionMode": "all",
+          "conditions": []
+        }
+      ],
+      "links": [
+        {
+          "port": "o_seal",
+          "toNodeId": "n7",
+          "label": "seal shown",
+          "conditionMode": "all",
+          "conditions": []
+        },
+        {
+          "port": "o_bribe",
+          "toNodeId": "n4",
+          "label": "",
+          "conditionMode": "all",
+          "conditions": []
+        },
+        {
+          "port": "o_wait",
+          "toNodeId": "n5",
+          "label": "",
+          "conditionMode": "all",
+          "conditions": []
+        }
+      ]
+    },
+    {
+      "id": "n4",
+      "type": "unlock",
+      "title": "The bribe",
+      "text": "Bram pockets the coin without looking at it. He will remember this.",
+      "speakerId": "c_bram",
+      "locationId": "l_gate",
+      "when": "Day 1 · Night",
+      "why": "Cost of the shortcut.",
+      "jumpToNodeId": "",
+      "characterIds": [
+        "c_bram"
+      ],
+      "factionIds": [],
+      "itemIds": [],
+      "speciesIds": [],
+      "loreIds": [],
+      "textId": "T_n4",
+      "lines": [],
+      "status": "",
+      "labels": [],
+      "image": "",
+      "conditionMode": "all",
+      "conditions": [],
+      "effects": [
+        {
+          "variable": "gold",
+          "op": "subtract",
+          "value": "10"
+        },
+        {
+          "variable": "bramTrust",
+          "op": "subtract",
+          "value": "1"
+        }
+      ],
+      "eventName": "",
+      "hostNodeId": "",
+      "discoverKind": "",
+      "options": [],
+      "links": [
+        {
+          "port": "out",
+          "toNodeId": "n7",
+          "label": "through at night",
+          "conditionMode": "all",
+          "conditions": []
+        }
+      ]
+    },
+    {
+      "id": "n5",
+      "type": "scene",
+      "title": "Dawn at the gate",
+      "text": "Wren sleeps against the wall. At first light a lamplighter arrives with a brass lantern and a look of disapproval.",
+      "speakerId": "c_maren",
+      "locationId": "l_gate",
+      "when": "Day 2 · Dawn",
+      "why": "The patient path is slower but safer.",
+      "jumpToNodeId": "",
+      "characterIds": [
+        "c_wren",
+        "c_maren"
+      ],
+      "factionIds": [
+        "f_guild"
+      ],
+      "itemIds": [],
+      "speciesIds": [],
+      "loreIds": [],
+      "textId": "T_n5",
+      "lines": [],
+      "status": "",
+      "labels": [],
+      "image": "",
+      "conditionMode": "all",
+      "conditions": [],
+      "effects": [
+        {
+          "variable": "day",
+          "op": "set",
+          "value": "2"
+        }
+      ],
+      "eventName": "",
+      "hostNodeId": "",
+      "discoverKind": "",
+      "options": [],
+      "links": [
+        {
+          "port": "out",
+          "toNodeId": "n6",
+          "label": "",
+          "conditionMode": "all",
+          "conditions": []
+        }
+      ]
+    },
+    {
+      "id": "n6",
+      "type": "dialogue",
+      "title": "Maren lends her lantern",
+      "text": "\"Take it. Bring it back lit and I'll know you made it. Bring it back dark and I'll know you didn't.\"",
+      "speakerId": "c_maren",
+      "locationId": "l_gate",
+      "when": "Day 2 · Dawn",
+      "why": "Grant the item that makes the road survivable.",
+      "jumpToNodeId": "",
+      "characterIds": [
+        "c_maren"
+      ],
+      "factionIds": [
+        "f_guild"
+      ],
+      "itemIds": [
+        "i_lantern"
+      ],
+      "speciesIds": [],
+      "loreIds": [],
+      "textId": "T_n6",
+      "lines": [
+        {
+          "speakerId": "",
+          "text": "",
+          "emotion": "",
+          "stringId": "L_ljh08zblyj"
+        }
+      ],
+      "status": "",
+      "labels": [],
+      "image": "",
+      "conditionMode": "all",
+      "conditions": [],
+      "effects": [
+        {
+          "variable": "item:i_lantern",
+          "op": "give",
+          "value": ""
+        },
+        {
+          "variable": "guildRep",
+          "op": "add",
+          "value": "1"
+        }
+      ],
+      "eventName": "",
+      "hostNodeId": "",
+      "discoverKind": "",
+      "options": [],
+      "links": [
+        {
+          "port": "out",
+          "toNodeId": "n7",
+          "label": "",
+          "conditionMode": "all",
+          "conditions": []
+        }
+      ]
+    },
+    {
+      "id": "n7",
+      "type": "scene",
+      "title": "Lantern Road",
+      "text": "The causeway runs out over the marsh. Fog swallows the far end. Somewhere out there, the Hollow.",
+      "speakerId": "c_wren",
+      "locationId": "l_road",
+      "when": "Night or Dawn",
+      "why": "The threshold. Converges all paths.",
+      "jumpToNodeId": "",
+      "characterIds": [
+        "c_wren"
+      ],
+      "factionIds": [],
+      "itemIds": [],
+      "speciesIds": [],
+      "loreIds": [],
+      "textId": "T_n7",
+      "lines": [],
+      "status": "",
+      "labels": [],
+      "image": "",
+      "conditionMode": "all",
+      "conditions": [],
+      "effects": [],
+      "eventName": "",
+      "hostNodeId": "",
+      "discoverKind": "",
+      "options": [],
+      "links": [
+        {
+          "port": "out",
+          "toNodeId": "n8",
+          "label": "",
+          "conditionMode": "all",
+          "conditions": []
+        }
+      ]
+    },
+    {
+      "id": "n8",
+      "type": "check",
+      "title": "Can you see the road?",
+      "text": "",
+      "speakerId": "",
+      "locationId": "l_road",
+      "when": "",
+      "why": "The consequence of the gate choice lands here.",
+      "jumpToNodeId": "",
+      "characterIds": [],
+      "factionIds": [],
+      "itemIds": [],
+      "speciesIds": [],
+      "loreIds": [],
+      "textId": "T_n8",
+      "lines": [],
+      "status": "",
+      "labels": [],
+      "image": "",
+      "conditionMode": "all",
+      "conditions": [
+        {
+          "variable": "item:i_lantern",
+          "op": "has",
+          "value": ""
+        }
+      ],
+      "effects": [],
+      "eventName": "",
+      "hostNodeId": "",
+      "discoverKind": "",
+      "options": [],
+      "links": [
+        {
+          "port": "pass",
+          "toNodeId": "n9",
+          "label": "",
+          "conditionMode": "all",
+          "conditions": []
+        },
+        {
+          "port": "fail",
+          "toNodeId": "n11",
+          "label": "",
+          "conditionMode": "all",
+          "conditions": []
+        }
+      ]
+    },
+    {
+      "id": "n9",
+      "type": "scene",
+      "title": "The Hollow",
+      "text": "Lantern held high, Wren finds the sunken village and the door the letter is bound for.",
+      "speakerId": "c_wren",
+      "locationId": "l_hollow",
+      "when": "Day 2 · Morning",
+      "why": "Payoff for the patient path.",
+      "jumpToNodeId": "",
+      "characterIds": [
+        "c_wren"
+      ],
+      "factionIds": [
+        "f_guild"
+      ],
+      "itemIds": [
+        "i_lantern"
+      ],
+      "speciesIds": [],
+      "loreIds": [],
+      "textId": "T_n9",
+      "lines": [],
+      "status": "",
+      "labels": [],
+      "image": "",
+      "conditionMode": "all",
+      "conditions": [],
+      "effects": [],
+      "eventName": "",
+      "hostNodeId": "",
+      "discoverKind": "",
+      "options": [],
+      "links": [
+        {
+          "port": "out",
+          "toNodeId": "n10",
+          "label": "",
+          "conditionMode": "all",
+          "conditions": []
+        }
+      ]
+    },
+    {
+      "id": "n10",
+      "type": "ending",
+      "title": "The Lantern Kept",
+      "text": "The letter is delivered. Maren gets her lantern back, still lit.",
+      "speakerId": "",
+      "locationId": "l_hollow",
+      "when": "",
+      "why": "Good ending.",
+      "jumpToNodeId": "",
+      "characterIds": [],
+      "factionIds": [],
+      "itemIds": [],
+      "speciesIds": [],
+      "loreIds": [],
+      "textId": "T_n10",
+      "lines": [],
+      "status": "",
+      "labels": [],
+      "image": "",
+      "conditionMode": "all",
+      "conditions": [],
+      "effects": [],
+      "eventName": "",
+      "hostNodeId": "",
+      "discoverKind": "",
+      "options": [],
+      "links": []
+    },
+    {
+      "id": "n11",
+      "type": "ending",
+      "title": "Lost in the dark",
+      "text": "The marsh takes people who can't see their feet.",
+      "speakerId": "",
+      "locationId": "l_road",
+      "when": "",
+      "why": "Bad ending. The bribe was never the real cost.",
+      "jumpToNodeId": "",
+      "characterIds": [],
+      "factionIds": [],
+      "itemIds": [],
+      "speciesIds": [],
+      "loreIds": [],
+      "textId": "T_n11",
+      "lines": [],
+      "status": "",
+      "labels": [],
+      "image": "",
+      "conditionMode": "all",
+      "conditions": [],
+      "effects": [],
+      "eventName": "",
+      "hostNodeId": "",
+      "discoverKind": "",
+      "options": [],
+      "links": []
+    },
+    {
+      "id": "n13",
+      "type": "discoverable",
+      "title": "Dropped purse by the brazier",
+      "text": "A guard's coin purse, half under the bench. Nobody is looking.",
+      "speakerId": "",
+      "locationId": "l_gate",
+      "when": "Day 1 · Dusk",
+      "why": "Optional pickup that makes the bribe affordable even after a bad start.",
+      "jumpToNodeId": "",
+      "characterIds": [
+        "c_wren"
+      ],
+      "factionIds": [
+        "f_watch"
+      ],
+      "itemIds": [],
+      "speciesIds": [],
+      "loreIds": [],
+      "textId": "T_n13",
+      "lines": [],
+      "status": "",
+      "labels": [],
+      "image": "",
+      "conditionMode": "all",
+      "conditions": [],
+      "effects": [
+        {
+          "variable": "gold",
+          "op": "add",
+          "value": "5"
+        }
+      ],
+      "eventName": "",
+      "hostNodeId": "n1",
+      "discoverKind": "secret",
+      "options": [],
+      "links": [
+        {
+          "port": "out",
+          "toNodeId": "n2",
+          "label": "pocketed",
+          "conditionMode": "all",
+          "conditions": []
+        }
+      ]
+    }
+  ]
+}
