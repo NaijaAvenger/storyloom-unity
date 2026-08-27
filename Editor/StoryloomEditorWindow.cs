@@ -412,6 +412,7 @@ namespace Storyloom.EditorTools
             var dirGo = new GameObject("Storyloom Director"); var d = dirGo.AddComponent<StoryloomDirector>(); d.bindings = _b; d.keys = KeysAsset(); d.persistAcrossScenes = false; d.playStartNodeOnLoad = true;
             var light = new GameObject("Directional Light", typeof(Light)); var lt = light.GetComponent<Light>(); lt.type = LightType.Directional; lt.intensity = 1.1f; light.transform.rotation = Quaternion.Euler(50, -30, 0);
             if (style == GameStyle.TopDown) BuildTopDownWorld(s, d); else Build3DWorld(s, d, style);
+            MatchPropColliders(style != GameStyle.TopDown);   // bound prefabs made for the other style carry the wrong collider kind
             BuildUI(d, style);
             dirGo.AddComponent<StoryloomDebugHud>();
             Directory.CreateDirectory(Root + "/Scenes");
@@ -427,7 +428,7 @@ namespace Storyloom.EditorTools
             var cam = new GameObject("Main Camera", typeof(Camera), typeof(AudioListener)); cam.tag = "MainCamera"; var c = cam.GetComponent<Camera>(); c.orthographic = true; c.orthographicSize = 6; c.backgroundColor = new Color(.16f, .24f, .16f); c.clearFlags = CameraClearFlags.SolidColor; cam.transform.position = new Vector3(0, 0, -10);
             var follow = cam.AddComponent<SimpleFollow>();
             var player = Primitive("Player", PrimitiveType.Capsule, new Color(.4f, .7f, 1f), new Vector3(.7f, .7f, .7f)); player.transform.position = new Vector3(0, -2, 0);
-            var rb = player.AddComponent<Rigidbody2D>(); rb.gravityScale = 0; rb.freezeRotation = true; rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
+            var rb = player.AddComponent<Rigidbody2D>(); rb.gravityScale = 0; rb.freezeRotation = true; rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous; rb.sleepMode = RigidbodySleepMode2D.NeverSleep; rb.interpolation = RigidbodyInterpolation2D.Interpolate;   // a sleeping body stops firing zone triggers
             var pc = player.AddComponent<CircleCollider2D>(); pc.radius = .4f;
             var ctrl = player.AddComponent<PlayerController2D>(); ctrl.keys = d.keys;
             follow.target = player.transform;
@@ -550,6 +551,24 @@ namespace Storyloom.EditorTools
             if (bk == 0) DestroyImmediate(back);
         }
 
+        // Only the three *default* placeholder prefabs are swapped when the style changes — a prefab you bound to a particular
+        // character / item / discoverable is left alone, by design. That means a character bound to a 3D placeholder lands in a
+        // top-down scene carrying a CapsuleCollider, and Unity refuses to put a BoxCollider2D beside it (AddComponent logs
+        // "conflicts with the existing …" and returns null, which the old repair pass then dereferenced). Reconcile every prop the
+        // generator placed, so a scene is never built inconsistent in the first place.
+        static int MatchPropColliders(bool xz)
+        {
+            var swapped = new List<string>();
+            foreach (var go in Object.FindObjectsOfType<GameObject>(true))
+            {
+                if (go.scene != SceneManager.GetActiveScene()) continue;
+                if (!(go.name.StartsWith("NPC · ") || go.name.StartsWith("Item · ") || go.name.StartsWith("Discoverable · ") || go.name.StartsWith("Signpost · "))) continue;
+                if (StoryloomColliders.MatchPlane(go, xz)) swapped.Add(go.name);
+            }
+            if (swapped.Count > 0) Debug.Log($"Storyloom: gave {swapped.Count} object(s) the {(xz ? "3D" : "2D")} collider this style needs — their bound prefab was made for the other style: " + string.Join(", ", swapped));
+            return swapped.Count;
+        }
+
         // ---- UI (shared by every style). Each piece is created only if missing, so "Repair open scene" can rebuild the UI of an
         // older generated scene (missing InventoryHUD / PickupToast were why Tab and pickup popups silently did nothing).
         void BuildUI(StoryloomDirector d, GameStyle style) => EnsureUI(d, style);
@@ -640,8 +659,13 @@ namespace Storyloom.EditorTools
         // missing UI (InventoryHUD / PickupToast / banner — the silent "Tab does nothing" case), world components, colliders, zones.
         void RepairScene()
         {
-            int fixedCount = 0;
+            int fixedCount = 0; var swappedColliders = new List<string>();
+            // Repair makes the scene consistent with the player that is in it — it does not convert a scene from one style to
+            // another (that is what "Create test scene" does). Say so, because generating as top-down while the open scene is
+            // still the third-person one is exactly how you end up with 3D props in a 2D world.
             var player = Object.FindObjectOfType<StoryloomPlayer>(); bool xz = player && player.UsesXZ;
+            if (player && _b != null && player.Style != _b.gameStyle)
+                Debug.LogWarning($"Storyloom repair: the open scene's player is {player.Style} but the bindings' style is {_b.gameStyle}. Repairing as {player.Style} — use \"Create test scene\" to build a {_b.gameStyle} scene.");
             var dir0 = Object.FindObjectOfType<StoryloomDirector>();
             if (dir0)
             {
@@ -656,8 +680,9 @@ namespace Storyloom.EditorTools
                 bool npc = go.name.StartsWith("NPC · "), item = go.name.StartsWith("Item · "), disc = go.name.StartsWith("Discoverable · "), sign = go.name.StartsWith("Signpost · ");
                 if (!(npc || item || disc || sign)) continue;
                 // if (!go.GetComponent<Collider2D>()) { var c = go.AddComponent<BoxCollider2D>(); c.size = Vector2.one * .9f; fixedCount++; }
-                if (!xz && !go.GetComponent<Collider2D>()) { var c = go.AddComponent<BoxCollider2D>(); c.size = Vector2.one * .9f; fixedCount++; }
-                if (xz && !go.GetComponent<Collider>()) { var c = go.AddComponent<BoxCollider>(); c.size = Vector3.one * .9f; fixedCount++; }
+                // Objects instantiated from a prefab bound for another style carry the other dimension's collider; asking for
+                // the missing one on top of it makes Unity refuse (and return null, which then threw). Switch them over.
+                if (StoryloomColliders.MatchPlane(go, xz)) { fixedCount++; swappedColliders.Add(go.name); }
                 if (!go.GetComponent<Interactable>())
                 {
                     var nm = go.name.Substring(go.name.IndexOf('·') + 2); var s = _b.story.Story; fixedCount++;
@@ -671,7 +696,7 @@ namespace Storyloom.EditorTools
                 foreach (var tm in go.GetComponentsInChildren<TextMesh>(true)) { var lp = tm.transform.localPosition; if (!xz && lp.z > -0.5f) tm.transform.localPosition = new Vector3(lp.x, lp.y, -1f); if (xz && !tm.GetComponent<Billboard>()) tm.gameObject.AddComponent<Billboard>(); }
             }
             // var player = Object.FindObjectOfType<PlayerController2D>();
-            if (player && !xz) { if (!player.GetComponent<Collider2D>()) { player.gameObject.AddComponent<CircleCollider2D>().radius = .4f; fixedCount++; } var rb = player.GetComponent<Rigidbody2D>(); if (rb) { rb.gravityScale = 0; rb.freezeRotation = true; } }
+            if (player && !xz) { if (!player.GetComponent<Collider2D>()) { var pc = player.gameObject.AddComponent<CircleCollider2D>(); if (pc) { pc.radius = .4f; fixedCount++; } } var rb = player.GetComponent<Rigidbody2D>(); if (rb) { rb.gravityScale = 0; rb.freezeRotation = true; if (rb.sleepMode != RigidbodySleepMode2D.NeverSleep) { rb.sleepMode = RigidbodySleepMode2D.NeverSleep; fixedCount++; } rb.interpolation = RigidbodyInterpolation2D.Interpolate; rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous; } }
             if (player && xz && !player.GetComponent<CursorLock>()) { player.gameObject.AddComponent<CursorLock>().keys = player.keys; fixedCount++; }
             foreach (var z in Object.FindObjectsOfType<LocationTrigger>()) { var c3 = z.GetComponent<Collider>(); if (c3) { if (!c3.isTrigger) { c3.isTrigger = true; fixedCount++; } if (!z.GetComponent<Rigidbody>()) { var rb = z.gameObject.AddComponent<Rigidbody>(); rb.isKinematic = true; rb.useGravity = false; fixedCount++; } if (z.gameObject.layer != 2) { z.gameObject.layer = 2; fixedCount++; } } var c2 = z.GetComponent<Collider2D>(); if (c2 && !c2.isTrigger) { c2.isTrigger = true; fixedCount++; } }
             // objects renamed by hand: match their label (TextMesh) text against character / item / location names and attach the right component
@@ -688,12 +713,12 @@ namespace Storyloom.EditorTools
                     else if (it != null) { goP.AddComponent<ItemPickup>().itemId = it.id; fixedCount++; }
                     else if (dnn != null) { goP.AddComponent<DiscoverableInteractable>().nodeId = dnn.id; fixedCount++; }
                     else continue;
-                    if (!xz && !goP.GetComponent<Collider2D>()) { var c = goP.AddComponent<BoxCollider2D>(); c.size = Vector2.one * .9f; }
-                    if (xz && !goP.GetComponent<Collider>()) { var c = goP.AddComponent<BoxCollider>(); c.size = Vector3.one * .9f; }
+                    if (StoryloomColliders.MatchPlane(goP, xz)) swappedColliders.Add(goP.name);
                     var pr2 = goP.transform.Find("Prompt"); var inter2 = goP.GetComponent<Interactable>(); if (pr2 && inter2) inter2.prompt = pr2.gameObject;
                 }
             }
             var dir = Object.FindObjectOfType<StoryloomDirector>(); if (dir && !dir.GetComponent<StoryloomDebugHud>()) { dir.gameObject.AddComponent<StoryloomDebugHud>(); fixedCount++; }
+            if (swappedColliders.Count > 0) Debug.Log($"Storyloom repair: gave {swappedColliders.Count} object(s) the {(xz ? "3D" : "2D")} collider this style needs (they came from a prefab bound for the other style): " + string.Join(", ", swappedColliders));
             EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
             ShowNotification(new GUIContent($"Repaired {fixedCount} thing{(fixedCount == 1 ? "" : "s")}"));
         }

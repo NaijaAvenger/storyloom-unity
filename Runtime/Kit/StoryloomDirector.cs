@@ -93,7 +93,15 @@ namespace Storyloom
             Runner = new StoryRunner(Story);
             Runner.OnEvent += (name, n) => OnStoryEvent?.Invoke(name);
             Runner.OnEnding += n => OnEndingReached?.Invoke(n);
-            Runner.OnVariableChanged += (k, v) => { if (k.StartsWith(StoryRunner.ItemPrefix)) { var id = k.Substring(StoryRunner.ItemPrefix.Length); if (v is bool b && b) OnItemGained?.Invoke(id); else OnItemLost?.Invoke(id); if (inventoryHud) inventoryHud.Refresh(); } };
+            // The HUD refresh runs inside GiveItem/TakeItem: an exception in there (a half-built inventory prefab, a missing row)
+            // used to unwind through Pickup and the beat coroutine, so the item arrived but the "Got X" toast never fired.
+            Runner.OnVariableChanged += (k, v) =>
+            {
+                if (!k.StartsWith(StoryRunner.ItemPrefix)) return;
+                var id = k.Substring(StoryRunner.ItemPrefix.Length);
+                if (v is bool b && b) OnItemGained?.Invoke(id); else OnItemLost?.Invoke(id);
+                if (inventoryHud) { try { inventoryHud.Refresh(); } catch (Exception e) { Debug.LogError("Storyloom: inventory refresh failed — " + e); } }
+            };
             Runner.ResetVariables(); bindings.ApplyStartingValues(Runner);
         }
         /// <summary>Reset variables and apply the editor's starting-value overrides.</summary>
@@ -118,8 +126,9 @@ namespace Storyloom
                 if (!(npc || item || disc || sign)) continue;
                 bool touched = false;
                 // if (!go.GetComponent<Collider2D>()) { var c = go.AddComponent<BoxCollider2D>(); c.size = Vector2.one * .9f; touched = true; }
-                if (!xz && !go.GetComponent<Collider2D>()) { var c = go.AddComponent<BoxCollider2D>(); c.size = Vector2.one * .9f; touched = true; }
-                if (xz && !go.GetComponent<Collider>()) { var c = go.AddComponent<BoxCollider>(); c.size = Vector3.one * .9f; touched = true; }
+                // A prop from a prefab bound for the other style carries the other dimension's collider, and Unity will not hold
+                // both — asking for the missing one logged "conflicts with the existing …" and handed back null. Switch it over.
+                if (StoryloomColliders.MatchPlane(go, xz)) touched = true;
                 if (!go.GetComponent<Interactable>())
                 {
                     var nm = go.name.Substring(go.name.IndexOf('·') + 2); touched = true;
@@ -129,10 +138,12 @@ namespace Storyloom
                     else { var l = (Story.locations ?? new Location[0]).FirstOrDefault(x => x.name == nm); go.AddComponent<Signpost>().locationId = l != null ? l.id : ""; }
                     var pr = go.transform.Find("Prompt"); var inter = go.GetComponent<Interactable>(); if (pr && inter) inter.prompt = pr.gameObject;
                 }
-                if (touched) fixedNames.Add(go.name);
+                // reach is measured against the colliders, and this runs after their Awake cached them — re-read whatever we just added
+                if (touched) { var inter2 = go.GetComponent<Interactable>(); if (inter2) inter2.CacheColliders(); fixedNames.Add(go.name); }
             }
             // var player = FindObjectOfType<PlayerController2D>();
-            if (player && !xz && !player.GetComponent<Collider2D>()) { player.gameObject.AddComponent<CircleCollider2D>().radius = .4f; fixedNames.Add(player.name); }
+            if (player && !xz && !player.GetComponent<Collider2D>()) { var pc = player.gameObject.AddComponent<CircleCollider2D>(); if (pc) { pc.radius = .4f; fixedNames.Add(player.name); } }
+            if (player && !xz) { var prb = player.GetComponent<Rigidbody2D>(); if (prb) { prb.sleepMode = RigidbodySleepMode2D.NeverSleep; prb.interpolation = RigidbodyInterpolation2D.Interpolate; prb.collisionDetectionMode = CollisionDetectionMode2D.Continuous; } }
             // zones: must be triggers; in 3D they need a kinematic rigidbody for enter/exit against the CharacterController and sit on Ignore Raycast
             foreach (var z in FindObjectsOfType<LocationTrigger>(true))
             {
@@ -319,8 +330,25 @@ namespace Storyloom
         /// "was" there (a beat set the location before the player arrived), which used to swallow the popup.</summary>
         public void EnterLocation(string locationId)
         {
-            if (locationId != _lastBannerLoc) { _lastBannerLoc = locationId; var loc = Story.GetLocation(locationId); var b = bindings.Location(locationId); if (banner && loc != null) banner.Show(loc.name, RegionLine(loc), b != null ? b.banner : null, LocationBlurb(loc)); Note("Zone: entered " + (loc != null ? loc.name : locationId)); }
+            if (locationId != _lastBannerLoc)
+            {
+                _lastBannerLoc = locationId;
+                var loc = Story.GetLocation(locationId); var b = bindings.Location(locationId);
+                if (!banner) ResolveUI();
+                if (banner && loc != null) banner.Show(loc.name, RegionLine(loc), b != null ? b.banner : null, LocationBlurb(loc));
+                Note("Zone: entered " + (loc != null ? loc.name : locationId) + (banner ? "" : " (NO BANNER IN SCENE)"));
+            }
+            else Note("Zone: re-entered " + locationId + " (banner already showing for it)");
             SetLocation(locationId, true);
+        }
+        /// <summary>The player walked out of a zone. Clearing the banner latch here is what lets the popup fire again when they come
+        /// back: the latch used to be sticky, so A → B → A showed nothing on the return, and a story beat that pre-set the location
+        /// swallowed the arrival popup entirely.</summary>
+        public void ExitLocation(string locationId)
+        {
+            if (PlayerLocationId == locationId) PlayerLocationId = "";
+            if (_lastBannerLoc == locationId) _lastBannerLoc = "";
+            Note("Zone: left " + locationId);
         }
         void SetLocation(string locationId, bool fromWorld)
         {
@@ -328,7 +356,9 @@ namespace Storyloom
             _talkingTo = "";
             CurrentLocationId = locationId;
             var loc = Story.GetLocation(locationId); var b = bindings.Location(locationId);
-            if (!fromWorld && banner && loc != null) { banner.Show(loc.name, RegionLine(loc), b != null ? b.banner : null, LocationBlurb(loc)); _lastBannerLoc = locationId; }
+            // A story beat moving the location shows the banner but deliberately does *not* claim the latch: the latch belongs to
+            // where the player's body is, so walking there afterwards still gets its own arrival popup.
+            if (!fromWorld && banner && loc != null) banner.Show(loc.name, RegionLine(loc), b != null ? b.banner : null, LocationBlurb(loc));
             OnLocationChanged?.Invoke(locationId);
             if (loadScenesForLocations && b != null && !string.IsNullOrEmpty(b.sceneName) && SceneManager.GetActiveScene().name != b.sceneName) { SceneManager.LoadScene(b.sceneName); return; }
             if (fromWorld && !InBeat) ResumeHere(locationId);
@@ -349,7 +379,13 @@ namespace Storyloom
         {
             var it = Story.GetItem(itemId); if (it == null) { Note("Pickup: unknown item id " + itemId); return; }
             var beat = pickupPlaysGivingBeat ? GivingBeat(itemId) : null;
-            if (beat != null && !Played.Contains(beat.id) && !InBeat && Available(beat) && Ok(beat)) { _pickupToast = it; Note($"Pickup {it.name}: playing its giving beat '{beat.title}' (toast after)"); PlayNode(beat.id); return; }   // text + all effects (gold, flags, the item) through the runner
+            if (beat != null && !Played.Contains(beat.id) && !InBeat && Available(beat) && Ok(beat))
+            {
+                _pickupToast = it; Note($"Pickup {it.name}: playing its giving beat '{beat.title}' (toast after)");
+                PlayNode(beat.id);                                   // text + all effects (gold, flags, the item) through the runner
+                if (InBeat || _pickupToast == null) return;          // running (toast fires when it ends), or it already ran and toasted
+                _pickupToast = null; Note($"Pickup {it.name}: giving beat did not start — granting the item directly");
+            }
             Runner.GiveItem(itemId);
             var b = bindings.Item(itemId);
             if (!toast) ResolveUI();

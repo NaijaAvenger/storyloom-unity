@@ -29,8 +29,11 @@ namespace Storyloom
             _cc.Move((dir * speed + Vector3.up * _vy) * Time.deltaTime);
             if (animator) animator.SetFloat("Speed", dir.magnitude);
 
-            var best = Interactable.Nearest(transform.position, _facing, out float nd, true); NearestDistance = nd; NearestName = best ? best.name : "";
-            if (best && nd > Reach) best = null;
+            // Standing still, the last move direction is a poor guess at what the player means — they orbit the camera to look at
+            // things. Bias by the camera when idle, by the move direction when walking.
+            var aim = dir.sqrMagnitude > 0.01f ? _facing : (cam ? fwd : _facing);
+            var near = Interactable.Nearest(transform.position, aim, out float nd, true); NearestDistance = nd; NearestName = near ? near.name : "";
+            var best = Interactable.Nearest(transform.position, aim, out _, true, Reach);   // range is applied while choosing, not afterwards
             SetFocus(best);
             HandleActionKeys();
         }

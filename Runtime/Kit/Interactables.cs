@@ -15,24 +15,55 @@ namespace Storyloom
         // Every enabled interactable registers here; the player picks the nearest one in reach by distance, so focus works
         // whatever colliders, layers or physics mode the prefab uses.
         public static readonly List<Interactable> All = new List<Interactable>();
-        protected virtual void Awake() { Register(); }
-        protected virtual void OnEnable() { Register(); }
+        protected virtual void Awake() { CacheColliders(); Register(); }
+        protected virtual void OnEnable() { CacheColliders(); Register(); }
         protected virtual void OnDisable() { All.Remove(this); }
         void Register() { All.RemoveAll(x => x == null); if (!All.Contains(this)) All.Add(this); }
+        // With "Enter Play Mode Options" set to skip the domain reload, statics survive between play sessions: start each run empty.
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)] static void ResetStatics() { All.Clear(); }
+
+        // ---- geometry: reach is measured to the object's collider, not to its pivot ---------------------------------
+        // Pivot-to-pivot distance is what made reach feel random: a wide NPC, an off-centre pivot, or a prefab whose mesh
+        // sits above its root all read as further away than they look. Every candidate is now measured to the nearest point
+        // on its collider (2D colliders for top-down, 3D colliders for the third-/first-person styles).
+        Collider[] _cols3; Collider2D[] _cols2;
+        /// <summary>Re-read the colliders; call after adding or removing one at runtime.</summary>
+        public void CacheColliders() { _cols3 = GetComponentsInChildren<Collider>(true); _cols2 = GetComponentsInChildren<Collider2D>(true); }
+        /// <summary>The point on this object's colliders closest to `from`, or its position when it has none.</summary>
+        public Vector3 ClosestPointTo(Vector3 from, bool xz)
+        {
+            if (_cols3 == null || _cols2 == null) CacheColliders();
+            var best = transform.position; float bestSqr = 0f; bool any = false;
+            void Consider(Bounds b) { var p = b.ClosestPoint(from); var v = p - from; if (xz) v.y = 0; else v.z = 0; float sq = v.sqrMagnitude; if (!any || sq < bestSqr) { any = true; bestSqr = sq; best = p; } }
+            // prefer the colliders that match the world plane; fall back to the other kind so hand-built prefabs still work
+            if (xz) { foreach (var c in _cols3) if (c && c.enabled) Consider(c.bounds); if (!any) foreach (var c in _cols2) if (c && c.enabled) Consider(c.bounds); }
+            else { foreach (var c in _cols2) if (c && c.enabled) Consider(c.bounds); if (!any) foreach (var c in _cols3) if (c && c.enabled) Consider(c.bounds); }
+            return best;
+        }
+        /// <summary>Distance from `from` to this object's collider surface, flattened onto the world plane.</summary>
+        public float DistanceTo(Vector3 from, bool xz) { var v = ClosestPointTo(from, xz) - from; if (xz) v.y = 0; else v.z = 0; return v.magnitude; }
+
         /// <summary>Nearest enabled interactable to a point (XY plane, top-down), any distance. Used by the player and the debug HUD.</summary>
-        public static Interactable Nearest(Vector2 origin, Vector2 facing, out float dist) => Nearest(new Vector3(origin.x, origin.y, 0), new Vector3(facing.x, facing.y, 0), out dist, false);
+        public static Interactable Nearest(Vector2 origin, Vector2 facing, out float dist) => Nearest(new Vector3(origin.x, origin.y, 0), new Vector3(facing.x, facing.y, 0), out dist, false, float.PositiveInfinity);
+        /// <summary>Nearest enabled interactable within `maxDistance` of a point (XY plane, top-down).</summary>
+        public static Interactable Nearest(Vector2 origin, Vector2 facing, out float dist, float maxDistance) => Nearest(new Vector3(origin.x, origin.y, 0), new Vector3(facing.x, facing.y, 0), out dist, false, maxDistance);
         /// <summary>Nearest enabled interactable, measured on the XY plane (top-down) or the XZ plane (3D styles), preferring what the player faces.</summary>
-        public static Interactable Nearest(Vector3 origin, Vector3 facing, out float dist, bool xz)
+        public static Interactable Nearest(Vector3 origin, Vector3 facing, out float dist, bool xz) => Nearest(origin, facing, out dist, xz, float.PositiveInfinity);
+        /// <summary>Nearest enabled interactable whose collider is within `maxDistance`, preferring what the player faces. The range
+        /// test happens *before* the winner is picked, so a reachable object is never lost to a closer-scoring one that is out of reach.</summary>
+        public static Interactable Nearest(Vector3 origin, Vector3 facing, out float dist, bool xz, float maxDistance)
         {
             Interactable best = null; float bestScore = float.MaxValue; dist = float.MaxValue;
-            foreach (var it in All)
+            var f = facing; if (xz) f.y = 0; else f.z = 0; f = f.sqrMagnitude > 0.0001f ? f.normalized : Vector3.zero;
+            for (int i = All.Count - 1; i >= 0; i--)
             {
-                if (it == null || !it.enabled || !it.gameObject.activeInHierarchy) continue;
-                var to = it.transform.position - origin; if (xz) to.y = 0; else to.z = 0;
-                var f = facing; if (xz) f.y = 0; else f.z = 0;
+                var it = All[i];
+                if (it == null) { All.RemoveAt(i); continue; }
+                if (!it.enabled || !it.gameObject.activeInHierarchy) continue;
+                var to = it.ClosestPointTo(origin, xz) - origin; if (xz) to.y = 0; else to.z = 0;
                 float d = to.magnitude;
-                // float score = d - 0.5f * (d > 0.001f ? Vector3.Dot(to / d, f.normalized) : 0f);
-                float score = d - 0.15f * (d > 0.001f ? Vector3.Dot(to / d, f.normalized) : 0f);   // nearest wins; facing only breaks near-ties
+                if (d > maxDistance) continue;                                                              // out of reach: never competes
+                float score = d - 0.15f * (d > 0.001f && f != Vector3.zero ? Vector3.Dot(to / d, f) : 0f);   // nearest wins; facing only breaks near-ties
                 if (score < bestScore) { bestScore = score; best = it; dist = d; }
             }
             return best;
@@ -116,26 +147,89 @@ namespace Storyloom
     public class LocationTrigger : MonoBehaviour
     {
         public string locationId;
-        void Reset() { var c2 = GetComponent<Collider2D>(); if (c2) c2.isTrigger = true; var c3 = GetComponent<Collider>(); if (c3) c3.isTrigger = true; }
-        void Enter(Component other) { if (other.GetComponentInParent<StoryloomPlayer>() && StoryloomDirector.Instance) { StoryloomDirector.Instance.PlayerLocationId = locationId; StoryloomDirector.Instance.EnterLocation(locationId); } }
-        void Exit(Component other) { if (other.GetComponentInParent<StoryloomPlayer>() && StoryloomDirector.Instance && StoryloomDirector.Instance.PlayerLocationId == locationId) StoryloomDirector.Instance.PlayerLocationId = ""; }
-        void OnTriggerEnter2D(Collider2D other) { Enter(other); }
-        void OnTriggerExit2D(Collider2D other) { Exit(other); }
-        void OnTriggerEnter(Collider other) { Enter(other); }
-        void OnTriggerExit(Collider other) { Exit(other); }
-        // Physics trigger events can be missed (CharacterControllers, sleeping bodies, layer matrices), so every zone also polls whether the
-        // player is inside it — 3D and 2D alike. Whichever fires first wins; the other is ignored because the player's zone already matches.
+        [Tooltip("How often the zone re-checks whether the player is inside (seconds). The poll backs up the physics trigger events, which CharacterControllers and sleeping bodies can miss.")]
+        public float pollInterval = 0.1f;
+        [Tooltip("Slack added to the volume once the player is inside, so standing on the boundary doesn't flip the zone (and re-show the banner) over and over.")]
+        public float exitSlack = 0.35f;
+        void Reset() { foreach (var c in GetComponents<Collider2D>()) c.isTrigger = true; foreach (var c in GetComponents<Collider>()) c.isTrigger = true; }
+
+        // The generated zones put the trigger on the same object as this component. Children are *not* swept: in the top-down
+        // scenes the location root is also the parent of every NPC and prop, and their colliders are not part of the volume.
+        Collider[] _cols3; Collider2D[] _cols2;
+        void OnEnable() { CacheVolume(); _inside = false; _next = 0f; }
+        /// <summary>Re-read the trigger volume; call after adding or removing one of its colliders at runtime.</summary>
+        public void CacheVolume()
+        {
+            _cols3 = GetComponents<Collider>(); _cols2 = GetComponents<Collider2D>();
+            if (_cols3.Length == 0 && _cols2.Length == 0)   // hand-built zone with the volume on a child
+            { _cols3 = GetComponentsInChildren<Collider>(true); _cols2 = GetComponentsInChildren<Collider2D>(true); }
+        }
+
+        // Both the physics callbacks and the poll below funnel through these, so `_inside` always matches what the director
+        // believes. Previously only the poll maintained it, and the two could disagree for a whole tick — long enough to lose
+        // an arrival (or fire a spurious exit) when the player crossed between two zones.
+        void MarkEntered()
+        {
+            if (_inside) return; _inside = true;
+            var d = StoryloomDirector.Instance; if (!d) return;
+            d.PlayerLocationId = locationId; d.EnterLocation(locationId);
+        }
+        void MarkExited()
+        {
+            if (!_inside) return; _inside = false;
+            var d = StoryloomDirector.Instance; if (!d) return;
+            d.ExitLocation(locationId);
+        }
+        static bool IsPlayer(Component other) => other && other.GetComponentInParent<StoryloomPlayer>();
+        void OnTriggerEnter2D(Collider2D other) { if (IsPlayer(other)) MarkEntered(); }
+        void OnTriggerExit2D(Collider2D other) { if (IsPlayer(other)) MarkExited(); }
+        void OnTriggerEnter(Collider other) { if (IsPlayer(other)) MarkEntered(); }
+        void OnTriggerExit(Collider other) { if (IsPlayer(other)) MarkExited(); }
+
+        // Physics trigger events can be missed (CharacterControllers, sleeping bodies, layer matrices), so every zone also polls
+        // whether the player is inside it — 3D and 2D alike. Whichever notices first wins; the other is a no-op.
         bool _inside; float _next;
         void Update()
         {
             var p = StoryloomPlayer.Current; if (!p) return;
-            if (Time.time < _next) return; _next = Time.time + 0.1f;
-            bool inside;
-            if (p.UsesXZ) { var c3 = GetComponent<Collider>(); if (!c3) return; inside = c3.bounds.Contains(p.transform.position + Vector3.up * 0.5f); }
-            else { var c2 = GetComponent<Collider2D>(); if (!c2) return; inside = c2.OverlapPoint(p.transform.position); }
-            var d = StoryloomDirector.Instance;
-            if (inside && !_inside) { _inside = true; if (d && d.PlayerLocationId != locationId) Enter(p); }
-            else if (!inside && _inside) { _inside = false; Exit(p); }
+            if (Time.time < _next) return; _next = Time.time + Mathf.Max(0.01f, pollInterval);
+            if (Contains(p, _inside ? Mathf.Max(0f, exitSlack) : 0f)) MarkEntered(); else MarkExited();
+        }
+        /// <summary>Is the player's body inside this zone (within `slack` of it)? Tests the player's collider centre and its feet,
+        /// so a shallow zone volume — or a player whose pivot sits at the floor — still registers.</summary>
+        public bool Contains(StoryloomPlayer p, float slack = 0f)
+        {
+            if (!p) return false;
+            if (_cols3 == null || _cols2 == null) CacheVolume();
+            var feet = p.transform.position;
+            var mid = p.BodyCentre;
+            if (p.UsesXZ)
+            {
+                foreach (var c in _cols3) if (c && c.enabled && (Inside(c, mid, slack) || Inside(c, feet, slack))) return true;
+                return false;
+            }
+            foreach (var c in _cols2) if (c && c.enabled && (Inside(c, mid, slack) || Inside(c, feet, slack))) return true;
+            return false;
+        }
+        // ClosestPoint returns the point itself when it is inside the collider — unlike bounds.Contains this respects the zone's
+        // rotation and scale. (Non-convex mesh colliders don't support it and fall back to the bounding box.)
+        static bool Inside(Collider c, Vector3 point, float slack)
+        {
+            var b = c.bounds; b.Expand(slack * 2f); if (!b.Contains(point)) return false;
+            var mc = c as MeshCollider; if (mc && !mc.convex) return true;
+            return (c.ClosestPoint(point) - point).sqrMagnitude <= slack * slack + 1e-6f;
+        }
+        static bool Inside(Collider2D c, Vector3 point, float slack)
+        {
+            var b = c.bounds; b.Expand(slack * 2f); if (!b.Contains(new Vector3(point.x, point.y, b.center.z))) return false;
+            if (slack <= 0f) return c.OverlapPoint(point);
+            return ((Vector2)c.ClosestPoint(point) - (Vector2)point).sqrMagnitude <= slack * slack + 1e-6f;
+        }
+        void OnDrawGizmosSelected()
+        {
+            Gizmos.color = new Color(.3f, .8f, 1f, .35f);
+            foreach (var c in GetComponents<Collider>()) Gizmos.DrawWireCube(c.bounds.center, c.bounds.size);
+            foreach (var c in GetComponents<Collider2D>()) Gizmos.DrawWireCube(c.bounds.center, c.bounds.size);
         }
     }
 

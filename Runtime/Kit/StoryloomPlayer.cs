@@ -19,8 +19,21 @@ namespace Storyloom
         public Interactable Focus { get; protected set; }
         public float NearestDistance { get; protected set; }
         public string NearestName { get; protected set; } = "";
-        /// <summary>Centre-to-centre reach: the bind's radius plus room for the two bodies.</summary>
+        /// <summary>How far the player can reach: the bind's radius plus room for the two bodies. Measured from the player to the
+        /// nearest point on the target's collider (see <see cref="Interactable.DistanceTo"/>), not centre to centre.</summary>
         public float Reach => (keys ? keys.interactRadius : 1.1f) + 1.1f;
+        /// <summary>The middle of the player's body — the CharacterController / collider centre, else roughly chest height.
+        /// Zones test this as well as the feet, so a shallow trigger volume can't be stepped over.</summary>
+        public Vector3 BodyCentre
+        {
+            get
+            {
+                var cc = GetComponent<CharacterController>(); if (cc) return transform.TransformPoint(cc.center);
+                var c2 = GetComponent<Collider2D>(); if (c2 && c2.enabled) return c2.bounds.center;
+                var c3 = GetComponent<Collider>(); if (c3 && c3.enabled) return c3.bounds.center;
+                return transform.position + (UsesXZ ? Vector3.up * 0.8f : Vector3.zero);
+            }
+        }
 
         protected virtual void OnEnable() { Current = this; }
         protected virtual void OnDisable() { if (Current == this) Current = null; }
@@ -47,6 +60,43 @@ namespace Storyloom
         }
     }
 
+    /// <summary>Collider housekeeping shared by the runtime self-repair and the editor's "Repair open scene".
+    ///
+    /// Unity will not hold 2D and 3D colliders on one GameObject: <c>AddComponent</c> logs "conflicts with the existing …"
+    /// and returns <c>null</c>. Objects instantiated from a prefab bound for another style (a per-character prefab is never
+    /// style-swapped, so a 3D placeholder can end up in a top-down scene) carry the wrong kind, and blindly asking for the
+    /// other one both spammed the console and threw a NullReferenceException on the returned null. These helpers switch the
+    /// object over instead.</summary>
+    public static class StoryloomColliders
+    {
+        // DestroyImmediate in both edit and play mode, deliberately: a plain Destroy is deferred to the end of the frame, so the
+        // conflicting collider would still be attached when we ask for its replacement and Unity would refuse all over again.
+        // This runs in the one-shot repair pass, never per frame.
+        static void Kill(UnityEngine.Object o) { if (o) UnityEngine.Object.DestroyImmediate(o); }
+
+        /// <summary>Give `go` the collider kind the world plane needs, removing the other kind from the object first.
+        /// Returns true when something changed. A CharacterController is left alone — that is a body, not a prop collider.</summary>
+        public static bool MatchPlane(GameObject go, bool xz, float size = .9f)
+        {
+            if (!go || go.GetComponent<CharacterController>()) return false;
+            bool changed = false;
+            if (xz)
+            {
+                foreach (var wrong in go.GetComponents<Collider2D>()) { Kill(wrong); changed = true; }
+                if (!go.GetComponent<Collider>()) { var c = go.AddComponent<BoxCollider>(); if (c) { c.size = Vector3.one * size; changed = true; } else Blocked(go, "3D"); }
+            }
+            else
+            {
+                foreach (var wrong in go.GetComponents<Collider>()) { Kill(wrong); changed = true; }
+                if (!go.GetComponent<Collider2D>()) { var c = go.AddComponent<BoxCollider2D>(); if (c) { c.size = Vector2.one * size; changed = true; } else Blocked(go, "2D"); }
+            }
+            if (changed) { var it = go.GetComponent<Interactable>(); if (it) it.CacheColliders(); }
+            return changed;
+        }
+        // AddComponent returns null instead of throwing when it is refused; say which object so it can be fixed by hand.
+        static void Blocked(GameObject go, string kind) => Debug.LogWarning($"Storyloom: couldn't give '{go.name}' a {kind} collider — something on it (a RequireComponent, or a collider of the other dimension that can't be removed) is in the way. Give it the right collider by hand, or bind a prefab made for this style.");
+    }
+
     /// <summary>Keeps a label (TextMesh) facing the camera. Used by the 3D placeholder prefabs.</summary>
     public class Billboard : MonoBehaviour
     {
@@ -66,6 +116,11 @@ namespace Storyloom
     public class CursorLock : MonoBehaviour
     {
         public StoryloomKeyBinds keys; public bool enabledLock = true; bool _released;
+        /// <summary>True while the mouse belongs to the player rather than to the game: locking is switched off, or Cancel handed
+        /// the pointer back (click / interact takes it again). The look controllers read this instead of Cursor.lockState — in the
+        /// editor the pointer often isn't actually captured until the first click into the Game view, and gating look on the real
+        /// lock state left first person unable to turn at all.</summary>
+        public bool Released => !enabledLock || _released;
         void Update()
         {
             if (!enabledLock) { Cursor.lockState = CursorLockMode.None; Cursor.visible = true; return; }

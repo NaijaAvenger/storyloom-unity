@@ -9,7 +9,7 @@ namespace Storyloom
     public class StoryloomDebugHud : MonoBehaviour
     {
         public bool show = true; public KeyCode legacyToggle = KeyCode.F1;
-        GUIStyle _st;
+        GUIStyle _st; LocationTrigger[] _zones; string _zoneLine = ""; float _nextZoneScan;
         void Update()
         {
 #if ENABLE_INPUT_SYSTEM
@@ -17,6 +17,13 @@ namespace Storyloom
 #else
             if (Input.GetKeyDown(legacyToggle)) show = !show;
 #endif
+            // which zones geometrically contain the player, regardless of whether their trigger fired — the quickest way to tell
+            // "the volume is in the wrong place" from "the physics callback went missing"
+            if (!show || Time.unscaledTime < _nextZoneScan) return; _nextZoneScan = Time.unscaledTime + 0.25f;
+            if (_zones == null || _zones.Length == 0 || System.Array.Exists(_zones, z => z == null)) _zones = FindObjectsOfType<LocationTrigger>();
+            var p = StoryloomPlayer.Current;
+            var inside = p ? _zones.Where(z => z && z.Contains(p)).Select(z => z.locationId).ToArray() : new string[0];
+            _zoneLine = $"zones: {_zones.Length}  you are geometrically inside: {(inside.Length > 0 ? string.Join(", ", inside) : "—")}";
         }
         void OnGUI()
         {
@@ -31,9 +38,10 @@ namespace Storyloom
             if (d) s += $"inventory hud: {(d.inventoryHud ? (d.inventoryHud.IsOpen ? "open" : "closed") : "MISSING")}  toast: {(d.toast ? "ok" : "MISSING")}  dialogue: {(d.dialogue ? "ok" : "MISSING")}  items owned: {(d.Runner != null ? d.Runner.Inventory().Count() : 0)}\n";
             if (d) s += $"director: {(d.Runner != null ? "ok" : "NO RUNNER")}  inBeat {d.InBeat}  story@ {d.CurrentLocationId}  player@ {d.PlayerLocationId}  pending {(string.IsNullOrEmpty(d.PendingNodeId) ? "—" : d.PendingNodeId)}  played {d.Played.Count}";
             else s += "no StoryloomDirector";
+            if (!string.IsNullOrEmpty(_zoneLine)) s += "\n" + _zoneLine;
             if (p && p.keys) s += $"\nbinds: interact {p.keys.interact}/{p.keys.interactAlt}  inventory {p.keys.inventory}/{p.keys.inventoryAlt}  cursor {Cursor.lockState}";
             s += "\n— log —\n" + (StoryloomDirector.Log.Count == 0 ? "(nothing yet: walk to something, press the interact key)" : string.Join("\n", StoryloomDirector.Log));
-            GUI.Box(new Rect(8, 8, 640, 150 + 15 * (StoryloomDirector.Log.Count + 1)), s, _st);
+            GUI.Box(new Rect(8, 8, 660, 170 + 15 * (StoryloomDirector.Log.Count + 1)), s, _st);
         }
     }
 }
