@@ -41,12 +41,9 @@ namespace Storyloom.EditorTools
                 ("Welcome / guide", true, (System.Action)StoryloomWelcomeWindow.Open));
             if (_b != null)
             {
-                using (new EditorGUILayout.HorizontalScope())
-                {
-                    EditorGUILayout.LabelField("Game style", GUILayout.Width(80));
-                    var ns = (GameStyle)GUILayout.Toolbar((int)_b.gameStyle, new[] { "Top-down", "Third person", "First person" }, GUILayout.Height(22));
-                    if (ns != _b.gameStyle) { Undo.RecordObject(_b, "Game style"); _b.gameStyle = ns; EditorUtility.SetDirty(_b); }
-                }
+                EditorGUILayout.LabelField("Game style", EditorStyles.miniBoldLabel);
+                var ns = (GameStyle)FlowToolbar((int)_b.gameStyle, new[] { "Top-down", "Third person", "First person" }, 22);
+                if (ns != _b.gameStyle) { Undo.RecordObject(_b, "Game style"); _b.gameStyle = ns; EditorUtility.SetDirty(_b); }
                 EditorGUILayout.LabelField(_b.gameStyle == GameStyle.TopDown ? "Top-down: XY world, 2D physics, camera looks down. WASD move, E talk / pick up / examine." :
                                            _b.gameStyle == GameStyle.ThirdPerson ? "Third person: 3D world on XZ, camera orbits behind the player (mouse / right stick). WASD move relative to the camera." :
                                            "First person: 3D world on XZ, mouse look with a crosshair; interact with what you look at. Esc frees the mouse, click to grab it back.", EditorStyles.wordWrappedMiniLabel);
@@ -69,7 +66,7 @@ namespace Storyloom.EditorTools
             _b.defaultItemPrefab = (GameObject)EditorGUILayout.ObjectField("Default item prefab", _b.defaultItemPrefab, typeof(GameObject), false);
             _b.defaultDiscoverablePrefab = (GameObject)EditorGUILayout.ObjectField("Default discoverable prefab", _b.defaultDiscoverablePrefab, typeof(GameObject), false);
             GUILayout.Space(4);
-            _tab = GUILayout.Toolbar(_tab, _tabs);
+            _tab = FlowToolbar(_tab, _tabs, 20);
             _scroll = EditorGUILayout.BeginScrollView(_scroll);
             EditorGUI.BeginChangeCheck();
             switch (_tab)
@@ -84,6 +81,22 @@ namespace Storyloom.EditorTools
             }
             if (EditorGUI.EndChangeCheck()) EditorUtility.SetDirty(_b);
             EditorGUILayout.EndScrollView();
+        }
+
+        // A GUILayout.Toolbar that wraps: one segmented row when the window is wide enough, stacked rows when it isn't.
+        // The selected entry renders pressed; clicking another returns its index.
+        static int FlowToolbar(int selected, string[] labels, float height)
+        {
+            float w = EditorGUIUtility.currentViewWidth - 16f;
+            int perRow = Mathf.Clamp(Mathf.FloorToInt(w / 120f), 1, labels.Length);   // toolbar labels are short — wrap later than the action buttons
+            int result = selected;
+            for (int i = 0; i < labels.Length; i += perRow)
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                    for (int j = i; j < Mathf.Min(i + perRow, labels.Length); j++)
+                        if (GUILayout.Toggle(selected == j, labels[j], "Button", GUILayout.Height(height)) && selected != j) result = j;
+            }
+            return result;
         }
 
         // Toolbar buttons flow into as many rows as the window's width needs, instead of demanding a very wide window.
