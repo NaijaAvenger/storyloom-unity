@@ -263,8 +263,27 @@ namespace Storyloom
         /// <summary>Requirements a node needs before it can be found, or "" when open.</summary>
         public string LockReason(StoryNode n) => n != null && !Runner.Evaluate(n.conditions, n.conditionMode, out _) ? Runner.Reason(n.conditions, n.conditionMode) : "";
 
+        // ---- beat history: a snapshot of the full story state before each beat, so playtesting can rewind ------------
+        [Serializable] public class BeatRecord { public string nodeId, title; public string stateJson; public float time; }
+        /// <summary>One entry per beat played this session, oldest first; each holds the state from *before* that beat.</summary>
+        public readonly List<BeatRecord> History = new List<BeatRecord>();
+        /// <summary>Restore the story to the moment before `record`'s beat played. Story state (variables, inventory, played
+        /// set, pending, location) is fully restored; world objects a pickup destroyed stay gone (deactivated ones return).</summary>
+        public void RewindTo(BeatRecord record)
+        {
+            if (record == null || InBeat) return;
+            LoadJson(record.stateJson);
+            int i = History.IndexOf(record); if (i >= 0) History.RemoveRange(i, History.Count - i);
+            foreach (var p in FindObjectsOfType<ItemPickup>(true))                       // un-picked-up items come back
+                if (!p.gameObject.activeSelf && Runner != null && !Runner.HasItem(p.itemId)) p.gameObject.SetActive(true);
+            if (inventoryHud) inventoryHud.Refresh();
+            Note($"Rewound to before '{record.title}' ({Played.Count} played)");
+        }
+
         IEnumerator RunBeat(StoryNode first)
         {
+            History.Add(new BeatRecord { nodeId = first.id, title = string.IsNullOrEmpty(first.title) ? first.id : first.title, stateJson = SaveJson(), time = Time.time });
+            if (History.Count > 200) History.RemoveAt(0);
             InBeat = true; if (first.id == PendingNodeId) PendingNodeId = "";
             bool wasDiscoverable = first.IsDiscoverable; string reward = wasDiscoverable ? RewardSummary(first) : "";
             Runner.GoTo(first.id);

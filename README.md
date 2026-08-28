@@ -80,6 +80,18 @@ The window's **Entities** tab is a palette of the same assets — drag rows stra
 
 From your own tooling, `asset.ApplyTo(gameObject)` does the same thing in code. The interactables keep working from bare id strings too — assets are a convenience layer, not a requirement.
 
+Two more bridges into a real project:
+
+- **Location anchors.** The generated test scene lays locations out in an artificial lane; a `LocationAnchor` goes the other way. Drop one into *your* level, assign the location's entity asset, and **Populate from story** (in its inspector) places that location's NPCs, items, discoverables and signpost under it — landing on your hand-placed `StoryloomSpawnPoint` children first (id-reserved ones matched first), then a grid around the anchor — plus the zone trigger. Populate is idempotent (spawns are marked and skipped next time) and **Clear generated** removes only what it created.
+- **Id constants.** *Generate entity assets* also writes `Assets/Storyloom/StoryIds.cs`: `StoryIds.Characters.SisterElowen`, `StoryIds.Events.LanternLit`, etc. Game code that references the story stops being stringly-typed — typos and upstream renames become compile errors instead of silent no-ops.
+
+## Testing the narrative
+
+- **Simulator** (*Window ▸ Storyloom Simulator*, no scene or play mode needed): explores the story headlessly — every startable beat, every choice branch, every random outcome, from every reachable state (deduplicated by played-beats + variables, capped). Reports what static validation can't see: **soft-locks** (states where nothing can start and no ending was reached, with the shortest reproduction path), **endings no path reaches**, and **beats never played**. Model assumptions are documented in `StoryloomSimulator.cs`: the player can walk anywhere and talk to anyone (gates pause, they don't block), and played beats aren't replayed.
+- **Playtest panel** (*Window ▸ Storyloom Playtest*, in play mode): jump to any beat (bypasses strict order), **rewind** to before any beat already played (the director snapshots full story state per beat — variables, inventory, played set, pending, location; world objects a pickup destroyed stay gone), edit variables and inventory live, and flip the gating toggles. Iterating on beat 40 no longer means earning beats 1–39.
+
+A **Welcome / guide** window covers all of this in-editor; it opens on first import and can be set to show on every project start or never (*Window ▸ Storyloom Welcome* reopens it any time).
+
 ## Game styles
 
 The same story can be test-played three ways. The choice is stored on the Bindings asset (`gameStyle`) and shown as a toolbar in the window; **Create test scene** builds the matching scene and swaps the *default* placeholder prefabs to the matching kind (your own prefabs are never touched — 3D placeholders live in `Placeholders/3D/`).
