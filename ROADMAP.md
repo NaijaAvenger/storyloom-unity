@@ -1,15 +1,15 @@
 # Roadmap
 
-Where the kit is headed, ordered by impact. The two goals: make **prototyping the narrative** effortless, and make **importing the narrative into a real game** something a team can ship with. Done so far: entity assets + drag-and-drop (0.5.0), story simulator, playtest rewind panel, location anchors, generated id constants, welcome/guide window (0.6.0).
+Where the kit is headed, ordered by impact. The two goals: make **prototyping the narrative** effortless, and make **importing the narrative into a real game** something a team can ship with. Done so far: entity assets + drag-and-drop (0.5.0); story simulator, playtest rewind panel, location anchors, generated id constants, welcome/guide window (0.6.0); presentation interfaces + SpeechBubbleUI, runner/simulator test suite, asmdefs, update check (0.7.0).
 
 Each item lists why it matters, what to build, and rough size (S ≈ hours, M ≈ a day-ish, L ≈ several days).
 
-## 1. Presentation interfaces (M) — highest leverage for shipping
+## 1. ✅ DONE (0.7.0) — Presentation interfaces
 **Why:** the biggest blocker to using the kit in a real game is that `DialogueUI`, `InventoryHUD`, `LocationBanner` and `PickupToast` are concrete uGUI classes the director holds directly. Studios have their own UI stack (TMP, UI Toolkit, speech bubbles, comic panels).
 **What:** extract `IDialogueUI` / `IInventoryUI` / `IBannerUI` / `IToastUI` interfaces mirroring the current public methods (`Say`, `Narrate`, `Choose`, `ShowBark`, `Refresh`, `Show`…); director fields become interface references resolved via serialized `MonoBehaviour` + cast (Unity can't serialize interfaces) or a small locator; the kit's uGUI widgets become the default implementations. Ship one alternate implementation (world-space speech bubble) as proof.
 **Depends on:** nothing. **Unlocks:** #7 (VO), custom sample (#12).
 
-## 2. Runner + simulator test suite (M) — the foundation everything leans on
+## 2. ✅ DONE (0.7.0) — Runner + simulator test suite
 **Why:** the runner is pure C# and the simulator's honesty depends on it; several past bugs (gating, availability, effects) would have been caught by tests. Cheap insurance for every item below.
 **What:** an `.asmdef`'d editor test assembly; fixture stories as JSON strings; tests for traversal (choice/check/random/jump), conditions and effects, item prefix handling, strict-order availability, save/restore round-trips, and simulator ground truths (a story with a known soft-lock must report it; one without must not).
 **Depends on:** nothing. Do early — ideally alongside #1.

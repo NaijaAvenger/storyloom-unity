@@ -38,7 +38,7 @@ namespace Storyloom
         protected virtual void OnEnable() { Current = this; }
         protected virtual void OnDisable() { if (Current == this) Current = null; }
         protected bool InBeat => StoryloomDirector.Instance && StoryloomDirector.Instance.InBeat;
-        protected bool InventoryOpen => StoryloomDirector.Instance && StoryloomDirector.Instance.inventoryHud && StoryloomDirector.Instance.inventoryHud.IsOpen;
+        protected bool InventoryOpen => StoryloomDirector.Instance && StoryloomDirector.Instance.InventoryOpen;
 
         protected void SetFocus(Interactable best)
         {
@@ -50,12 +50,13 @@ namespace Storyloom
         /// <summary>Interact / inventory keys, shared by every style.</summary>
         protected void HandleActionKeys()
         {
-            if (keys.InteractDown()) { if (InBeat) StoryloomDirector.Note("Interact pressed during a beat — ignored"); else if (Focus) { StoryloomDirector.Note($"Interact → {Focus.name} ({Focus.Verb})"); Focus.Interact(this); } else { StoryloomDirector.Note($"Interact: nothing in reach (nearest {NearestName} at {NearestDistance:0.0}, reach {Reach:0.0})"); if (StoryloomDirector.Instance && StoryloomDirector.Instance.dialogue) StoryloomDirector.Instance.dialogue.ShowBark("", "Nothing to interact with here.", null); } }
+            if (keys.InteractDown()) { if (InBeat) StoryloomDirector.Note("Interact pressed during a beat — ignored"); else if (Focus) { StoryloomDirector.Note($"Interact → {Focus.name} ({Focus.Verb})"); Focus.Interact(this); } else { StoryloomDirector.Note($"Interact: nothing in reach (nearest {NearestName} at {NearestDistance:0.0}, reach {Reach:0.0})"); StoryloomDirector.Instance?.Dialogue?.ShowBark("", "Nothing to interact with here.", null); } }
             if (keys.InventoryDown())
             {
-                var d = StoryloomDirector.Instance; if (d && !d.inventoryHud) d.ResolveUI();
-                if (d && d.inventoryHud) { d.inventoryHud.Toggle(); StoryloomDirector.Note("Inventory key → " + (d.inventoryHud.IsOpen ? "opened" : "closed")); }
-                else { StoryloomDirector.Note("Inventory key pressed but no InventoryHUD in the scene"); Debug.LogWarning("Storyloom: inventory key pressed but the director has no InventoryHUD assigned"); }
+                var d = StoryloomDirector.Instance; if (d && d.Inventory == null) d.ResolveUI();
+                var inv = d ? d.Inventory : null;
+                if (inv != null) { inv.Toggle(); StoryloomDirector.Note("Inventory key → " + (inv.IsOpen ? "opened" : "closed")); }
+                else { StoryloomDirector.Note("Inventory key pressed but no inventory UI in the scene"); Debug.LogWarning("Storyloom: inventory key pressed but the director has no inventory UI (built-in or IInventoryUI override)"); }
             }
         }
     }
@@ -125,7 +126,7 @@ namespace Storyloom
         {
             if (!enabledLock) { Cursor.lockState = CursorLockMode.None; Cursor.visible = true; return; }
             var d = StoryloomDirector.Instance;
-            bool busy = (d && d.InBeat) || (d && d.inventoryHud && d.inventoryHud.IsOpen);
+            bool busy = (d && d.InBeat) || (d && d.InventoryOpen);
             if (keys && keys.CancelDown() && !busy) _released = true;
             if (_released && !busy && keys && keys.AdvanceDown()) _released = false;   // click / interact grabs the mouse again
             bool free = !busy && !_released;

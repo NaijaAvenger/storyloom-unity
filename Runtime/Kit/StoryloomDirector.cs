@@ -35,6 +35,20 @@ namespace Storyloom
         public InventoryHUD inventoryHud;
         public StoryMapUI map;                       // hold M: where you are / what's next / endings reached
 
+        [Header("Custom UI (optional) — any component implementing the matching interface; when set, the built-in widget above is ignored")]
+        public MonoBehaviour dialogueOverride;       // IDialogueUI
+        public MonoBehaviour bannerOverride;         // ILocationBannerUI
+        public MonoBehaviour toastOverride;          // IPickupToastUI
+        public MonoBehaviour inventoryOverride;      // IInventoryUI
+        // The director only ever talks to the UI through these. Override wins; the built-in widget is the fallback; both
+        // checked for Unity-aliveness (a destroyed override must not shadow a live widget as a fake-null interface).
+        static T Iface<T>(MonoBehaviour custom, MonoBehaviour builtIn) where T : class => custom && custom is T c ? c : builtIn && builtIn is T b ? b : null;
+        public IDialogueUI Dialogue => Iface<IDialogueUI>(dialogueOverride, dialogue);
+        public ILocationBannerUI Banner => Iface<ILocationBannerUI>(bannerOverride, banner);
+        public IPickupToastUI Toast => Iface<IPickupToastUI>(toastOverride, toast);
+        public IInventoryUI Inventory => Iface<IInventoryUI>(inventoryOverride, inventoryHud);
+        public bool InventoryOpen => Inventory != null && Inventory.IsOpen;
+
         [Header("Behaviour")]
         public bool playStartNodeOnLoad = true;      // play the story's start node when the scene starts
         public bool autoPlaySceneBeatsOnEnter = true;// entering a location plays unplayed Scene beats set there
@@ -78,9 +92,19 @@ namespace Storyloom
             if (!inventoryHud) { inventoryHud = FindObjectOfType<InventoryHUD>(true); if (inventoryHud) missing.Add("inventoryHud"); }
             if (!banner) { banner = FindObjectOfType<LocationBanner>(true); if (banner) missing.Add("banner"); }
             if (!map) { map = FindObjectOfType<StoryMapUI>(true); if (map) missing.Add("map"); }
+            // no built-in widget: adopt any custom implementation living in the scene (a hand-rolled IDialogueUI etc.)
+            if (Dialogue == null) { dialogueOverride = FindImplementation<IDialogueUI>(); if (dialogueOverride) missing.Add("dialogue (custom)"); }
+            if (Banner == null) { bannerOverride = FindImplementation<ILocationBannerUI>(); if (bannerOverride) missing.Add("banner (custom)"); }
+            if (Toast == null) { toastOverride = FindImplementation<IPickupToastUI>(); if (toastOverride) missing.Add("toast (custom)"); }
+            if (Inventory == null) { inventoryOverride = FindImplementation<IInventoryUI>(); if (inventoryOverride) missing.Add("inventory (custom)"); }
             if (missing.Count > 0) Debug.LogWarning("Storyloom: director was missing UI references, found them in the scene: " + string.Join(", ", missing));
-            if (!toast) Debug.LogWarning("Storyloom: no PickupToast in the scene — 'Got X' popups can't show. Regenerate the scene from Window ▸ Storyloom.");
-            if (!inventoryHud) Debug.LogWarning("Storyloom: no InventoryHUD in the scene — the inventory key can't open anything. Regenerate the scene from Window ▸ Storyloom.");
+            if (Toast == null) Debug.LogWarning("Storyloom: no pickup toast in the scene — 'Got X' popups can't show. Regenerate the scene from Window ▸ Storyloom, or add a component implementing IPickupToastUI.");
+            if (Inventory == null) Debug.LogWarning("Storyloom: no inventory UI in the scene — the inventory key can't open anything. Regenerate the scene from Window ▸ Storyloom, or add a component implementing IInventoryUI.");
+        }
+        static MonoBehaviour FindImplementation<T>() where T : class
+        {
+            foreach (var m in FindObjectsOfType<MonoBehaviour>(true)) if (m is T) return m;
+            return null;
         }
         void Awake()
         {
@@ -100,7 +124,7 @@ namespace Storyloom
                 if (!k.StartsWith(StoryRunner.ItemPrefix)) return;
                 var id = k.Substring(StoryRunner.ItemPrefix.Length);
                 if (v is bool b && b) OnItemGained?.Invoke(id); else OnItemLost?.Invoke(id);
-                if (inventoryHud) { try { inventoryHud.Refresh(); } catch (Exception e) { Debug.LogError("Storyloom: inventory refresh failed — " + e); } }
+                var inv = Inventory; if (inv != null) { try { inv.Refresh(); } catch (Exception e) { Debug.LogError("Storyloom: inventory refresh failed — " + e); } }
             };
             Runner.ResetVariables(); bindings.ApplyStartingValues(Runner);
         }
@@ -195,7 +219,7 @@ namespace Storyloom
             {
                 var c = Story.GetCharacter(characterId); var nm = c != null ? c.name : "?";
                 bool hasLater = strictOrder && Story.nodes.Any(x => !x.IsDiscoverable && !Played.Contains(x.id) && Involves(x, characterId));   // they have lines, just not yet
-                if (dialogue) dialogue.ShowBark(nm, hasLater ? "…" + nm + " has nothing to say to you yet." : "...", Portrait(characterId));
+                Dialogue?.ShowBark(nm, hasLater ? "…" + nm + " has nothing to say to you yet." : "...", Portrait(characterId));
                 return;
             }
             PlayNode(n.id);
@@ -276,7 +300,7 @@ namespace Storyloom
             int i = History.IndexOf(record); if (i >= 0) History.RemoveRange(i, History.Count - i);
             foreach (var p in FindObjectsOfType<ItemPickup>(true))                       // un-picked-up items come back
                 if (!p.gameObject.activeSelf && Runner != null && !Runner.HasItem(p.itemId)) p.gameObject.SetActive(true);
-            if (inventoryHud) inventoryHud.Refresh();
+            Inventory?.Refresh();
             Note($"Rewound to before '{record.title}' ({Played.Count} played)");
         }
 
@@ -293,20 +317,21 @@ namespace Storyloom
                 OnBeatStarted?.Invoke(n);
                 if (!string.IsNullOrEmpty(n.locationId) && n.locationId != CurrentLocationId && n.type != "discoverable") SetLocation(n.locationId, false);
 
+                var dui = Dialogue;   // resolved per node so a custom presenter can be swapped in mid-run
                 if (n.IsDialogue && n.lines != null && n.lines.Length > 0)
                 {
                     foreach (var l in n.lines)
                     {
                         var c = Story.GetCharacter(l.speakerId);
-                        yield return dialogue ? dialogue.Say(c != null ? c.name : "", l.text, Portrait(l.speakerId), l.emotion, Bark(l.speakerId)) : null;
+                        yield return dui != null ? dui.Say(c != null ? c.name : "", l.text, Portrait(l.speakerId), l.emotion, Bark(l.speakerId)) : null;
                     }
                 }
-                else if (n.IsEvent) { /* fired by the runner already */ if (!string.IsNullOrEmpty(n.text) && dialogue) yield return dialogue.Narrate(n.title, n.text); }
+                else if (n.IsEvent) { /* fired by the runner already */ if (!string.IsNullOrEmpty(n.text) && dui != null) yield return dui.Narrate(n.title, n.text); }
                 else if (n.IsCheck || n.IsRandom || n.IsJump) { /* silent pass-through */ }
                 else if (!string.IsNullOrEmpty(n.text) || n.IsEnding)
                 {
                     var speaker = Story.GetCharacter(n.speakerId);
-                    if (dialogue) yield return n.IsDialogue && speaker != null ? dialogue.Say(speaker.name, n.text, Portrait(n.speakerId), "", null) : dialogue.Narrate(n.title, n.text, n.IsEnding);
+                    if (dui != null) yield return n.IsDialogue && speaker != null ? dui.Say(speaker.name, n.text, Portrait(n.speakerId), "", null) : dui.Narrate(n.title, n.text, n.IsEnding);
                 }
 
                 if (n.IsEnding) { OnBeatFinished?.Invoke(n); break; }
@@ -318,7 +343,7 @@ namespace Storyloom
                 {
                     var opts = Runner.GetOptions();
                     if (opts.Count == 0) { OnBeatFinished?.Invoke(n); break; }             // dead end / discoverable return handled by runner
-                    if (n.IsChoice && dialogue) { yield return dialogue.Choose(opts, o => next = o); }
+                    if (n.IsChoice && dui != null) { yield return dui.Choose(opts, o => next = o); }
                     else next = opts.FirstOrDefault(o => !o.locked);
                 }
                 if (next == null) { OnBeatFinished?.Invoke(n); break; }
@@ -326,16 +351,16 @@ namespace Storyloom
                 // a discoverable's "back to host" return ends the beat without replaying the host
                 if (next.isReturn) { OnBeatFinished?.Invoke(n); break; }
                 // pause here if the next beat belongs to another character or another place — the world continues it
-                if (Gated(target, out var why)) { PendingNodeId = target.id; if (dialogue && !string.IsNullOrEmpty(why)) yield return dialogue.Narrate("", "…" + why + ".", false); OnBeatFinished?.Invoke(n); break; }
+                if (Gated(target, out var why)) { PendingNodeId = target.id; if (dui != null && !string.IsNullOrEmpty(why)) yield return dui.Narrate("", "…" + why + ".", false); OnBeatFinished?.Invoke(n); break; }
                 PendingNodeId = "";
                 Runner.Choose(next);
                 // stop at natural pauses: the next beat is a scene at another location (walk there) — Stardew style
                 if (target != null && !string.IsNullOrEmpty(target.locationId) && target.locationId != CurrentLocationId && target.type == "scene" && !autoPlaySceneBeatsOnEnter) { OnBeatFinished?.Invoke(n); break; }
             }
-            if (dialogue) dialogue.Hide();
+            Dialogue?.Hide();
             InBeat = false;
-            if (_pickupToast != null) { var pb = bindings.Item(_pickupToast.id); if (!toast) ResolveUI(); Note($"Beat ended: toast for {_pickupToast.name} {(toast ? "shown" : "MISSING")}, owned now {Runner.Inventory().Count()}"); if (toast) toast.Show($"Got {_pickupToast.name}" + (string.IsNullOrEmpty(reward) ? "" : " · " + reward), pb != null ? pb.icon : null); _pickupToast = null; }
-            else if (wasDiscoverable && toast && !string.IsNullOrEmpty(reward)) toast.Show(reward, null);   // what the discoverable gave / did
+            if (_pickupToast != null) { var pb = bindings.Item(_pickupToast.id); if (Toast == null) ResolveUI(); var tui = Toast; Note($"Beat ended: toast for {_pickupToast.name} {(tui != null ? "shown" : "MISSING")}, owned now {Runner.Inventory().Count()}"); tui?.Show($"Got {_pickupToast.name}" + (string.IsNullOrEmpty(reward) ? "" : " · " + reward), pb != null ? pb.icon : null); _pickupToast = null; }
+            else if (wasDiscoverable && !string.IsNullOrEmpty(reward)) Toast?.Show(reward, null);   // what the discoverable gave / did
             // the flow paused for a place the player is already standing in → continue there (dialogue still waits for its NPC)
             var pend2 = Story.GetNode(PendingNodeId);
             if (pend2 != null && !pend2.IsDialogue && !string.IsNullOrEmpty(pend2.locationId) && pend2.locationId == PlayerLocationId && Ok(pend2)) { yield return new WaitForSeconds(0.4f); if (!InBeat) { SetLocation(pend2.locationId, false); PlayNode(pend2.id); } }
@@ -353,9 +378,10 @@ namespace Storyloom
             {
                 _lastBannerLoc = locationId;
                 var loc = Story.GetLocation(locationId); var b = bindings.Location(locationId);
-                if (!banner) ResolveUI();
-                if (banner && loc != null) banner.Show(loc.name, RegionLine(loc), b != null ? b.banner : null, LocationBlurb(loc));
-                Note("Zone: entered " + (loc != null ? loc.name : locationId) + (banner ? "" : " (NO BANNER IN SCENE)"));
+                if (Banner == null) ResolveUI();
+                var bui = Banner;
+                if (bui != null && loc != null) bui.Show(loc.name, RegionLine(loc), b != null ? b.banner : null, LocationBlurb(loc));
+                Note("Zone: entered " + (loc != null ? loc.name : locationId) + (bui != null ? "" : " (NO BANNER IN SCENE)"));
             }
             else Note("Zone: re-entered " + locationId + " (banner already showing for it)");
             SetLocation(locationId, true);
@@ -377,7 +403,7 @@ namespace Storyloom
             var loc = Story.GetLocation(locationId); var b = bindings.Location(locationId);
             // A story beat moving the location shows the banner but deliberately does *not* claim the latch: the latch belongs to
             // where the player's body is, so walking there afterwards still gets its own arrival popup.
-            if (!fromWorld && banner && loc != null) banner.Show(loc.name, RegionLine(loc), b != null ? b.banner : null, LocationBlurb(loc));
+            if (!fromWorld && loc != null) Banner?.Show(loc.name, RegionLine(loc), b != null ? b.banner : null, LocationBlurb(loc));
             OnLocationChanged?.Invoke(locationId);
             if (loadScenesForLocations && b != null && !string.IsNullOrEmpty(b.sceneName) && SceneManager.GetActiveScene().name != b.sceneName) { SceneManager.LoadScene(b.sceneName); return; }
             if (fromWorld && !InBeat) ResumeHere(locationId);
@@ -407,9 +433,10 @@ namespace Storyloom
             }
             Runner.GiveItem(itemId);
             var b = bindings.Item(itemId);
-            if (!toast) ResolveUI();
-            Note($"Pickup {it.name}: gave item, toast {(toast ? "shown" : "MISSING")}, owned now {Runner.Inventory().Count()}");
-            if (toast) toast.Show($"Got {it.name}", b != null ? b.icon : null);
+            if (Toast == null) ResolveUI();
+            var tui = Toast;
+            Note($"Pickup {it.name}: gave item, toast {(tui != null ? "shown" : "MISSING")}, owned now {Runner.Inventory().Count()}");
+            tui?.Show($"Got {it.name}", b != null ? b.icon : null);
         }
 
         public Sprite Portrait(string characterId)
@@ -422,7 +449,7 @@ namespace Storyloom
 
         // ------------------------------------------------------------------ save / load
         public string SaveJson() { var st = Runner.SnapshotState(); return JsonUtility.ToJson(new SaveBlob { runner = st, played = Played.ToList(), location = CurrentLocationId, pending = PendingNodeId }); }
-        public void LoadJson(string json) { var b = JsonUtility.FromJson<SaveBlob>(json); Runner.RestoreState(b.runner); Played.Clear(); foreach (var p in b.played) Played.Add(p); CurrentLocationId = b.location; PendingNodeId = b.pending ?? ""; if (inventoryHud) inventoryHud.Refresh(); }
+        public void LoadJson(string json) { var b = JsonUtility.FromJson<SaveBlob>(json); Runner.RestoreState(b.runner); Played.Clear(); foreach (var p in b.played) Played.Add(p); CurrentLocationId = b.location; PendingNodeId = b.pending ?? ""; Inventory?.Refresh(); }
         [Serializable] class SaveBlob { public StoryRunnerState runner; public List<string> played; public string location; public string pending; }
     }
 }

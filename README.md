@@ -90,7 +90,13 @@ Two more bridges into a real project:
 - **Simulator** (*Window ▸ Storyloom Simulator*, no scene or play mode needed): explores the story headlessly — every startable beat, every choice branch, every random outcome, from every reachable state (deduplicated by played-beats + variables, capped). Reports what static validation can't see: **soft-locks** (states where nothing can start and no ending was reached, with the shortest reproduction path), **endings no path reaches**, and **beats never played**. Model assumptions are documented in `StoryloomSimulator.cs`: the player can walk anywhere and talk to anyone (gates pause, they don't block), and played beats aren't replayed.
 - **Playtest panel** (*Window ▸ Storyloom Playtest*, in play mode): jump to any beat (bypasses strict order), **rewind** to before any beat already played (the director snapshots full story state per beat — variables, inventory, played set, pending, location; world objects a pickup destroyed stay gone), edit variables and inventory live, and flip the gating toggles. Iterating on beat 40 no longer means earning beats 1–39.
 
-A **Welcome / guide** window covers all of this in-editor; it opens on first import and can be set to show on every project start or never (*Window ▸ Storyloom Welcome* reopens it any time).
+A **Welcome / guide** window covers all of this in-editor; it opens on first import and can be set to show on every project start or never (*Window ▸ Storyloom Welcome* reopens it any time). The kit also checks once per editor start whether a newer version exists on the repo and prompts when one does — the prompt has a checkbox to silence itself, and *Window ▸ Storyloom Check for Updates* checks by hand.
+
+## Custom UI — bring your own presentation
+
+The director talks to its UI only through four interfaces (`StoryloomUIContracts.cs`): `IDialogueUI` (lines, narration, choices, barks — the coroutines finish when the player has advanced), `ILocationBannerUI`, `IPickupToastUI` and `IInventoryUI`. The kit's uGUI widgets are just the default implementations. To swap in your own stack — TextMeshPro, UI Toolkit, speech bubbles, comic panels — implement the matching interface on any MonoBehaviour and drag it into the director's **Custom UI** override slot; the built-in widget is then ignored entirely. `SpeechBubbleUI` (world-space bubbles over whoever is speaking) is a complete, deliberately small example meant to be copied.
+
+The package ships assembly definitions (`Storyloom.Runtime` / `Storyloom.Editor` / `Storyloom.Tests`); scripts in `Assets/` keep compiling unchanged, and your own asmdefs can reference `Storyloom.Runtime` directly. An edit-mode test suite covers the runner and the simulator — add `"testables": ["com.storyloom.unity"]` to `Packages/manifest.json` to see it in the Test Runner.
 
 ## Game styles
 

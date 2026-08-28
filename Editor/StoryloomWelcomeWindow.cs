@@ -77,6 +77,7 @@ namespace Storyloom.EditorTools
                 if (GUILayout.Button("Open Storyloom window", GUILayout.Height(26))) StoryloomEditorWindow.Open();
                 if (GUILayout.Button("README", GUILayout.Height(26))) OpenDoc("README.md");
                 if (GUILayout.Button("Changelog", GUILayout.Height(26))) OpenDoc("CHANGELOG.md");
+                if (GUILayout.Button("Check for updates", GUILayout.Height(26))) StoryloomUpdateCheck.ManualCheck();
             }
 
             GUILayout.Space(8);

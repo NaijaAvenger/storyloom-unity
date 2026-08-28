@@ -35,7 +35,7 @@ namespace Storyloom
             s += $"interactables registered: {Interactable.All.Count} (live {live}): {string.Join(", ", Interactable.All.Where(i => i != null).Take(8).Select(i => i.name.Replace("NPC · ", "").Replace("Item · ", "").Replace("Discoverable · ", "").Replace("Signpost · ", "")))}{(Interactable.All.Count > 8 ? " …" : "")}\n";
             if (p) s += $"nearest: {(string.IsNullOrEmpty(p.NearestName) ? "—" : p.NearestName)}  dist {p.NearestDistance:0.00}  reach {p.Reach:0.00}\nfocus: {(p.Focus ? p.Focus.name : "—")}\n";
             else s += "no Storyloom player in scene\n";
-            if (d) s += $"inventory hud: {(d.inventoryHud ? (d.inventoryHud.IsOpen ? "open" : "closed") : "MISSING")}  toast: {(d.toast ? "ok" : "MISSING")}  dialogue: {(d.dialogue ? "ok" : "MISSING")}  items owned: {(d.Runner != null ? d.Runner.Inventory().Count() : 0)}\n";
+            if (d) s += $"inventory ui: {(d.Inventory != null ? (d.Inventory.IsOpen ? "open" : "closed") : "MISSING")}  toast: {(d.Toast != null ? "ok" : "MISSING")}  dialogue: {(d.Dialogue != null ? "ok" : "MISSING")}{(d.dialogueOverride || d.bannerOverride || d.toastOverride || d.inventoryOverride ? "  (custom UI)" : "")}  items owned: {(d.Runner != null ? d.Runner.Inventory().Count() : 0)}\n";
             if (d) s += $"director: {(d.Runner != null ? "ok" : "NO RUNNER")}  inBeat {d.InBeat}  story@ {d.CurrentLocationId}  player@ {d.PlayerLocationId}  pending {(string.IsNullOrEmpty(d.PendingNodeId) ? "—" : d.PendingNodeId)}  played {d.Played.Count}";
             else s += "no StoryloomDirector";
             if (!string.IsNullOrEmpty(_zoneLine)) s += "\n" + _zoneLine;

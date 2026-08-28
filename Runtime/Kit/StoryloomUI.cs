@@ -12,7 +12,7 @@ using UnityEngine.UI;
 
 namespace Storyloom
 {
-    public class DialogueUI : MonoBehaviour
+    public class DialogueUI : MonoBehaviour, IDialogueUI
     {
         public GameObject panel;
         public Image portrait;
@@ -105,7 +105,7 @@ namespace Storyloom
         IEnumerator WaitAdvance() { yield return null; while (K == null || !K.AdvanceDown()) yield return null; }
     }
 
-    public class LocationBanner : MonoBehaviour
+    public class LocationBanner : MonoBehaviour, ILocationBannerUI
     {
         public CanvasGroup group; public Text nameText, subText; public Text descText;   // descText: the location's description, shown under the name
         public Image art; public float hold = 2.2f, fade = .5f;
@@ -130,7 +130,7 @@ namespace Storyloom
         }
     }
 
-    public class PickupToast : MonoBehaviour
+    public class PickupToast : MonoBehaviour, IPickupToastUI
     {
         public CanvasGroup group; public Text text; public Image icon; public float hold = 1.6f;
         Coroutine _co;
@@ -142,7 +142,7 @@ namespace Storyloom
         IEnumerator Run() { if (!group) yield break; group.gameObject.SetActive(true); group.alpha = 1; yield return new WaitForSeconds(hold); for (float t = 0; t < .4f; t += Time.deltaTime) { group.alpha = 1 - t / .4f; yield return null; } group.gameObject.SetActive(false); }
     }
 
-    public class InventoryHUD : MonoBehaviour
+    public class InventoryHUD : MonoBehaviour, IInventoryUI
     {
         // rows stretch to the list width regardless of how the prefab was authored
         static void FitRow(GameObject row) { var rt = row.GetComponent<RectTransform>(); if (!rt) return; rt.anchorMin = new Vector2(0, 1); rt.anchorMax = new Vector2(1, 1); rt.pivot = new Vector2(.5f, 1); rt.sizeDelta = new Vector2(0, 28); var le = row.GetComponent<LayoutElement>() ?? row.AddComponent<LayoutElement>(); le.preferredHeight = 28; le.minHeight = 28; var t = row.GetComponentInChildren<Text>(); if (t) { t.horizontalOverflow = HorizontalWrapMode.Wrap; t.verticalOverflow = VerticalWrapMode.Overflow; t.alignment = TextAnchor.UpperLeft; t.supportRichText = true; t.fontSize = 14; } }

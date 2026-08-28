@@ -79,6 +79,6 @@ namespace Storyloom
     public class Crosshair : MonoBehaviour
     {
         public UnityEngine.UI.Image dot; public Color idle = new Color(1, 1, 1, .5f), active = new Color(1, .85f, .3f, 1f);
-        void Update() { var p = StoryloomPlayer.Current as FirstPersonController; var d = StoryloomDirector.Instance; bool busy = d && (d.InBeat || (d.inventoryHud && d.inventoryHud.IsOpen)); if (dot) { dot.enabled = !busy; dot.color = p && p.Focus ? active : idle; dot.rectTransform.sizeDelta = p && p.Focus ? new Vector2(10, 10) : new Vector2(6, 6); } }
+        void Update() { var p = StoryloomPlayer.Current as FirstPersonController; var d = StoryloomDirector.Instance; bool busy = d && (d.InBeat || d.InventoryOpen); if (dot) { dot.enabled = !busy; dot.color = p && p.Focus ? active : idle; dot.rectTransform.sizeDelta = p && p.Focus ? new Vector2(10, 10) : new Vector2(6, 6); } }
     }
 }

@@ -903,9 +903,9 @@ namespace Storyloom.EditorTools
             if (!d) { sb.Append("no StoryloomDirector in the scene\n"); Debug.Log(sb); return; }
             d.ResolveUI();
             sb.Append($"player: {(p ? p.GetType().Name + " (" + p.Style + ")" : "MISSING")}  keys: {(p && p.keys ? p.keys.name : "none")}  backend: {StoryloomKeyBinds.Backend}\n");
-            sb.Append($"toast: {(d.toast ? "ok" : "MISSING")}  inventoryHud: {(d.inventoryHud ? "ok" : "MISSING")}  dialogue: {(d.dialogue ? "ok" : "MISSING")}\n");
-            if (d.toast) { try { d.toast.Show("Self-test toast", null); sb.Append("toast.Show → called (should be visible top-right for ~2 s)\n"); } catch (System.Exception e) { sb.Append("toast.Show threw: " + e.Message + "\n"); } }
-            if (d.inventoryHud) { try { d.inventoryHud.Toggle(); sb.Append("inventory Toggle → " + (d.inventoryHud.IsOpen ? "OPEN" : "closed") + "\n"); } catch (System.Exception e) { sb.Append("inventory Toggle threw: " + e.Message + "\n"); } }
+            sb.Append($"toast: {(d.Toast != null ? "ok" : "MISSING")}  inventory ui: {(d.Inventory != null ? "ok" : "MISSING")}  dialogue: {(d.Dialogue != null ? "ok" : "MISSING")}\n");
+            if (d.Toast != null) { try { d.Toast.Show("Self-test toast", null); sb.Append("toast.Show → called (should be visible top-right for ~2 s)\n"); } catch (System.Exception e) { sb.Append("toast.Show threw: " + e.Message + "\n"); } }
+            if (d.Inventory != null) { try { d.Inventory.Toggle(); sb.Append("inventory Toggle → " + (d.Inventory.IsOpen ? "OPEN" : "closed") + "\n"); } catch (System.Exception e) { sb.Append("inventory Toggle threw: " + e.Message + "\n"); } }
             int live = Interactable.All.Count(i => i != null && i.enabled && i.gameObject.activeInHierarchy); sb.Append($"interactables live: {live}\n");
             if (p) { var near = Interactable.Nearest(p.transform.position, p.transform.forward, out float nd, p.UsesXZ); sb.Append($"nearest: {(near ? near.name : "—")} at {nd:0.00} (reach {p.Reach:0.00}); focus now: {(p.Focus ? p.Focus.name : "—")}; prompt object on nearest: {(near && near.prompt ? "yes" : "NO")}\n"); if (near) { near.EnsurePrompt(); near.SetFocused(true); sb.Append("forced the nearest one's [E] prompt on for this frame — look for it above the object\n"); } }
             // physics sanity: colliders on interactables, zones, overlaps between placed objects

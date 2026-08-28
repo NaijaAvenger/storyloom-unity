@@ -115,7 +115,7 @@ namespace Storyloom
         protected override void Awake() { if (item) itemId = item.entityId; base.Awake(); }
         void OnValidate() { if (item) itemId = item.entityId; }
         public override string Verb => "Pick up";
-        protected override void OnInteract(StoryloomPlayer p) { if (D) { var beat = D.GivingBeat(itemId); if (beat != null && D.strictOrder && !D.Played.Contains(beat.id) && !D.Available(beat)) { if (D.dialogue) D.dialogue.ShowBark("", "Not yet — this belongs to a part of the story you haven't reached.", null); return; } D.Pickup(itemId); } if (destroyOnPickup) Destroy(gameObject); else gameObject.SetActive(false); }
+        protected override void OnInteract(StoryloomPlayer p) { if (D) { var beat = D.GivingBeat(itemId); if (beat != null && D.strictOrder && !D.Played.Contains(beat.id) && !D.Available(beat)) { D.Dialogue?.ShowBark("", "Not yet — this belongs to a part of the story you haven't reached.", null); return; } D.Pickup(itemId); } if (destroyOnPickup) Destroy(gameObject); else gameObject.SetActive(false); }
         void Start() { if (D && D.Runner != null && D.Runner.HasItem(itemId) && destroyOnPickup) Destroy(gameObject); }   // already owned (e.g. after a load)
     }
 
@@ -147,9 +147,9 @@ namespace Storyloom
         protected override void OnInteract(StoryloomPlayer p)
         {
             if (!D) return; var n = Node; if (n == null) { Debug.LogWarning($"Storyloom: discoverable node {nodeId} not in this story"); return; }
-            if (onceOnly && D.Played.Contains(nodeId)) { if (D.dialogue) D.dialogue.ShowBark("", "Nothing more here.", null); return; }
-            var why = D.LockReason(n); if (!string.IsNullOrEmpty(why)) { if (D.dialogue) D.dialogue.ShowBark("", "You can't yet — " + why + ".", null); return; }
-            if (!D.Available(n)) { if (D.dialogue) D.dialogue.ShowBark("", "Nothing here yet.", null); return; }
+            if (onceOnly && D.Played.Contains(nodeId)) { D.Dialogue?.ShowBark("", "Nothing more here.", null); return; }
+            var why = D.LockReason(n); if (!string.IsNullOrEmpty(why)) { D.Dialogue?.ShowBark("", "You can't yet — " + why + ".", null); return; }
+            if (!D.Available(n)) { D.Dialogue?.ShowBark("", "Nothing here yet.", null); return; }
             D.PlayNode(nodeId);
             if (onceOnly) StartCoroutine(RelabelWhenDone());
         }
@@ -264,9 +264,10 @@ namespace Storyloom
             var text = StoryloomDirector.LocationBlurb(loc);
             if (string.IsNullOrEmpty(text)) text = (string.IsNullOrEmpty(loc.kind) ? "" : loc.kind + ". ") + "Nothing is written about this place yet — add a description or atmosphere in Storyloom's World tab.";
             // the same top-of-screen popup the zones use (re-reading the sign is allowed: banner, not dialogue)
-            if (!D.banner) D.ResolveUI();
-            if (D.banner) D.banner.Show(loc.name, "", null, text);
-            else if (D.dialogue) D.dialogue.ShowNarration(loc.name, text);
+            if (D.Banner == null) D.ResolveUI();
+            var bui = D.Banner;
+            if (bui != null) bui.Show(loc.name, "", null, text);
+            else D.Dialogue?.ShowNarration(loc.name, text);
         }
     }
 }
