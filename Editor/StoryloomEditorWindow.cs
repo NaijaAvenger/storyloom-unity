@@ -793,12 +793,23 @@ namespace Storyloom.EditorTools
 #else
             if (Object.FindObjectOfType<UnityEngine.EventSystems.EventSystem>() == null) new GameObject("EventSystem", typeof(UnityEngine.EventSystems.EventSystem), typeof(UnityEngine.EventSystems.StandaloneInputModule));
 #endif
+            // note which director refs were empty before filling them: "repair fixed it" without knowing what was broken
+            // is how bugs stay unfixed — this log names the actual gap
+            var wasEmpty = new List<string>();
+            if (!d.dialogue) wasEmpty.Add("dialogue"); if (!d.banner) wasEmpty.Add("banner"); if (!d.toast) wasEmpty.Add("toast"); if (!d.inventoryHud) wasEmpty.Add("inventoryHud"); if (!d.map) wasEmpty.Add("map");
             d.dialogue = Object.FindObjectOfType<DialogueUI>(true) ?? BuildDialogue(canvasGo);
             d.banner = Object.FindObjectOfType<LocationBanner>(true) ?? BuildBanner(canvasGo);
             if (d.banner && d.banner.descText == null) UpgradeBanner(d.banner);   // pre-0.4.5 banner: add the description line
             d.toast = Object.FindObjectOfType<PickupToast>(true) ?? BuildToast(canvasGo);
             d.inventoryHud = Object.FindObjectOfType<InventoryHUD>(true) ?? BuildInventory(canvasGo);
             d.map = Object.FindObjectOfType<StoryMapUI>(true) ?? BuildMap(canvasGo);
+            if (wasEmpty.Count > 0) Debug.Log("Storyloom: EnsureUI filled empty director UI ref(s): " + string.Join(", ", wasEmpty) + (Application.isPlaying ? " — this happened DURING PLAY, so the saved scene has them empty; run Repair outside play mode and save" : ""), d);
+            // widget wiring sanity: a component that exists but lost its internal refs "exists" to every repair check while
+            // doing nothing at runtime — name the broken field instead
+            if (d.dialogue && !d.dialogue.panel) Debug.LogWarning("Storyloom: DialogueUI has no panel assigned — dialogue can't show.", d.dialogue);
+            if (d.inventoryHud && !d.inventoryHud.panel) Debug.LogWarning("Storyloom: InventoryHUD has no panel assigned — Tab can't open anything.", d.inventoryHud);
+            if (d.toast && !d.toast.group) Debug.LogWarning("Storyloom: PickupToast has no CanvasGroup assigned — 'Got X' can't show.", d.toast);
+            if (d.banner && !d.banner.group) Debug.LogWarning("Storyloom: LocationBanner has no CanvasGroup assigned — arrival popups can't show.", d.banner);
             if (Object.FindObjectOfType<HelpLine>(true) == null) { var help = MakeText(canvasGo.transform, "Help", d.keys ? d.keys.HelpLine(style) : "", 14, TextAnchor.LowerLeft, new Color(1, 1, 1, .8f)); canvasGo.AddComponent<HelpLine>().text = help; Fit(help.gameObject, new Vector2(0, 0), new Vector2(1, 0), new Vector2(12, 6), new Vector2(-12, 26)); }
             if (style == GameStyle.FirstPerson && Object.FindObjectOfType<Crosshair>(true) == null) { var dotGo = Panel(canvasGo.transform, "Crosshair", new Color(1, 1, 1, .5f)); Fit(dotGo, new Vector2(.5f, .5f), new Vector2(.5f, .5f), new Vector2(-3, -3), new Vector2(3, 3)); dotGo.GetComponent<Image>().raycastTarget = false; canvasGo.AddComponent<Crosshair>().dot = dotGo.GetComponent<Image>(); }
             EditorUtility.SetDirty(d);
@@ -995,7 +1006,9 @@ namespace Storyloom.EditorTools
         static StoryloomPlayFocus() { EditorApplication.playModeStateChanged += OnPlayMode; }
         static void OnPlayMode(PlayModeStateChange state)
         {
-            if (state != PlayModeStateChange.EnteredPlayMode) return;
+            // focus before play begins (ExitingEditMode) so the view already has focus at frame one — the editor only honours
+            // Cursor.lockState while the Game view is focused — and again once play has started, in case a layout rebuild stole it
+            if (state != PlayModeStateChange.ExitingEditMode && state != PlayModeStateChange.EnteredPlayMode) return;
             if (!Object.FindObjectOfType<StoryloomDirector>()) return;
             var gameView = typeof(UnityEditor.Editor).Assembly.GetType("UnityEditor.GameView");
             if (gameView != null) EditorWindow.FocusWindowIfItsOpen(gameView);

@@ -154,6 +154,17 @@ namespace Storyloom
             var lrt = listParent as RectTransform; if (lrt) LayoutRebuilder.ForceRebuildLayoutImmediate(lrt);
         }
         public GameObject panel; public Transform listParent; public GameObject rowPrefab;   // row: Image + Text
+        void Awake()
+        {
+            // self-wire from the generated child names, so a scene whose serialized refs were lost still works instead of
+            // "Tab does nothing" / "the inventory needs repairing"
+            if (!panel) { var t = transform.Find("Inventory"); if (t) { panel = t.gameObject; Debug.LogWarning("Storyloom: InventoryHUD had no panel assigned — wired the 'Inventory' child. Run 'Repair open scene' outside play mode and save to persist.", this); } }
+            if (panel && !listParent) { var l = panel.transform.Find("List"); if (l) listParent = l; }
+            if (listParent && !rowPrefab) { var r = listParent.Find("Row"); if (r) rowPrefab = r.gameObject; }
+            // never start open: a panel saved active reads as "inventory open" from frame one, which freezes look, keeps the
+            // cursor visible, and makes the first Tab press appear to close an inventory that was never opened
+            if (panel && panel.activeSelf) panel.SetActive(false);
+        }
         public void Toggle() { if (!panel) { Debug.LogWarning("Storyloom: InventoryHUD has no panel assigned"); return; } panel.SetActive(!panel.activeSelf); if (panel.activeSelf) { try { Refresh(); } catch (System.Exception e) { Debug.LogError("Storyloom: inventory refresh failed — " + e); } } }
         public bool IsOpen => panel && panel.activeSelf;
         public void Refresh()
