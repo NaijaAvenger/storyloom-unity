@@ -73,7 +73,10 @@ Then wire things up by dragging:
 
 - **Onto a GameObject** (Hierarchy or Scene view): the object gains the matching component, wired to that entity — `NpcInteractable` for a character, `ItemPickup` for an item, `DiscoverableInteractable` for a discoverable, `LocationTrigger` (plus a trigger volume, on the right physics plane for the current style) for a location. **Alt-drop** a location to get a `Signpost` instead. Your own components, colliders and visuals are left alone; an existing interactable of that kind is rebound rather than duplicated.
 - **Onto empty ground in the Scene view**: the entity's bound prefab (or the default placeholder) is spawned at the drop point, wired.
+- **Onto a prefab in the Project window**: the prefab itself gains the wired component — every instance of it, in every scene, becomes that entity. Other Project-window drags (moving files between folders) are untouched.
 - **Into a component's asset field**: every interactable now has an asset slot (`character`, `item`, `discoverable`, `location`) next to its id string; drop an asset in and the id follows it, in the editor and again at runtime — so a prefab holding an `NpcInteractable` with a character asset assigned *is* that character, dialogue, gating and all.
+
+The window's **Entities** tab is a palette of the same assets — drag rows straight from it instead of hunting through the Project window. Once assets exist, **Create test scene** and **Repair open scene** stamp them onto every interactable they place or find (matching by id, never overwriting an assigned one), so generated scenes reference the typed handles too.
 
 From your own tooling, `asset.ApplyTo(gameObject)` does the same thing in code. The interactables keep working from bare id strings too — assets are a convenience layer, not a requirement.
 

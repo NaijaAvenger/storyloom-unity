@@ -18,7 +18,7 @@ namespace Storyloom.EditorTools
         [MenuItem("Window/Storyloom")] public static void Open() => GetWindow<StoryloomEditorWindow>("Storyloom");
         [MenuItem("Storyloom/Import story JSON…")] public static void ImportMenu() { Open(); GetWindow<StoryloomEditorWindow>().ImportJson(); }
 
-        StoryloomBindings _b; Vector2 _scroll; int _tab; string[] _tabs = { "Characters", "Items", "Locations", "Discoverables", "Variables", "Validate" };
+        StoryloomBindings _b; Vector2 _scroll; int _tab; string[] _tabs = { "Characters", "Items", "Locations", "Discoverables", "Entities", "Variables", "Validate" };
         const string Root = "Assets/Storyloom";
 
         void OnEnable() { if (_b == null) _b = AssetDatabase.FindAssets("t:StoryloomBindings").Select(g => AssetDatabase.LoadAssetAtPath<StoryloomBindings>(AssetDatabase.GUIDToAssetPath(g))).FirstOrDefault(); }
@@ -79,8 +79,9 @@ namespace Storyloom.EditorTools
                 case 1: foreach (var i in _b.items) Row(i.name, i.kind, () => { i.prefab = Obj("Prefab", i.prefab); i.icon = Spr("Icon", i.icon); i.stackable = EditorGUILayout.Toggle("Stackable", i.stackable); }); break;
                 case 2: foreach (var l in _b.locations) Row(l.name, l.kind, () => { l.sceneName = EditorGUILayout.TextField("Scene name", l.sceneName); l.prefab = Obj("Trigger prefab", l.prefab); l.banner = Spr("Banner art", l.banner); l.ambience = (AudioClip)EditorGUILayout.ObjectField("Ambience", l.ambience, typeof(AudioClip), false); }); break;
                 case 3: foreach (var d in _b.discoverables) Row(d.title, d.kind + (string.IsNullOrEmpty(d.hostNodeId) ? "" : " · at " + (s.GetNode(d.hostNodeId)?.title ?? d.hostNodeId)), () => { d.prefab = Obj("Prefab", d.prefab); d.worldSprite = Spr("World sprite", d.worldSprite); }); break;
-                case 4: VariablesTab(s); break;
-                case 5: Validate(s); break;
+                case 4: EntitiesTab(); break;
+                case 5: VariablesTab(s); break;
+                case 6: Validate(s); break;
             }
             if (EditorGUI.EndChangeCheck()) EditorUtility.SetDirty(_b);
             EditorGUILayout.EndScrollView();
@@ -286,8 +287,80 @@ namespace Storyloom.EditorTools
             foreach (var l in s.locations ?? new Location[0]) Ensure<StoryloomLocationAsset>("Locations", l.id, l.name);
             foreach (var n in (s.nodes ?? new StoryNode[0]).Where(n => n.IsDiscoverable)) Ensure<StoryloomDiscoverableAsset>("Discoverables", n.id, n.title);
             AssetDatabase.SaveAssets();
-            ShowNotification(new GUIContent($"Entity assets: {created} created, {updated} refreshed"));
+            int stamped = StampEntityAssets();
+            ShowNotification(new GUIContent($"Entity assets: {created} created, {updated} refreshed" + (stamped > 0 ? $", {stamped} scene ref(s) filled" : "")));
             EditorUtility.FocusProjectWindow(); Selection.activeObject = AssetDatabase.LoadAssetAtPath<Object>(root);
+        }
+
+        /// <summary>Every generated entity asset, keyed by "TypeName:entityId". Empty when none have been generated yet.</summary>
+        internal static Dictionary<string, StoryloomEntityAsset> LoadEntityAssets()
+        {
+            var map = new Dictionary<string, StoryloomEntityAsset>();
+            if (!AssetDatabase.IsValidFolder(Root + "/Entities")) return map;
+            foreach (var g in AssetDatabase.FindAssets("t:StoryloomEntityAsset", new[] { Root + "/Entities" }))
+            {
+                var a = AssetDatabase.LoadAssetAtPath<StoryloomEntityAsset>(AssetDatabase.GUIDToAssetPath(g));
+                if (a) map[a.GetType().Name + ":" + a.entityId] = a;
+            }
+            return map;
+        }
+        /// <summary>Fill the empty asset fields on every interactable / zone in the open scene from their id strings, so generated
+        /// and repaired scenes reference the typed handles instead of bare ids. Never overwrites an asset already assigned.</summary>
+        static int StampEntityAssets()
+        {
+            var map = LoadEntityAssets(); if (map.Count == 0) return 0;
+            int n = 0;
+            T Find<T>(string id) where T : StoryloomEntityAsset => map.TryGetValue(typeof(T).Name + ":" + id, out var a) ? a as T : null;
+            void Did(Object o) { EditorUtility.SetDirty(o); n++; }
+            foreach (var x in Object.FindObjectsOfType<NpcInteractable>(true)) { if (x.character) continue; var a = Find<StoryloomCharacterAsset>(x.characterId); if (a) { x.character = a; Did(x); } }
+            foreach (var x in Object.FindObjectsOfType<ItemPickup>(true)) { if (x.item) continue; var a = Find<StoryloomItemAsset>(x.itemId); if (a) { x.item = a; Did(x); } }
+            foreach (var x in Object.FindObjectsOfType<DiscoverableInteractable>(true)) { if (x.discoverable) continue; var a = Find<StoryloomDiscoverableAsset>(x.nodeId); if (a) { x.discoverable = a; Did(x); } }
+            foreach (var x in Object.FindObjectsOfType<Signpost>(true)) { if (x.location) continue; var a = Find<StoryloomLocationAsset>(x.locationId); if (a) { x.location = a; Did(x); } }
+            foreach (var x in Object.FindObjectsOfType<LocationTrigger>(true)) { if (x.location) continue; var a = Find<StoryloomLocationAsset>(x.locationId); if (a) { x.location = a; Did(x); } }
+            return n;
+        }
+
+        // The Entities tab: a palette of the generated assets. Rows are drag sources — drag one onto a GameObject, a prefab
+        // in the Project window, or empty ground in the Scene view, exactly like dragging the asset file itself.
+        void EntitiesTab()
+        {
+            var map = LoadEntityAssets();
+            if (map.Count == 0)
+            {
+                EditorGUILayout.HelpBox("No entity assets yet. Generate one ScriptableObject per character / item / location / discoverable — typed handles you drag onto GameObjects and prefabs to wire them to the story.", MessageType.Info);
+                if (GUILayout.Button("Generate entity assets", GUILayout.Height(26))) GenerateEntityAssets();
+                return;
+            }
+            EditorGUILayout.LabelField("Drag a row onto a GameObject (Hierarchy / Scene view), onto a prefab in the Project window, or onto empty ground in the Scene view to place it. Alt-drop a location for a Signpost instead of a zone.", EditorStyles.wordWrappedMiniLabel);
+            if (GUILayout.Button("Re-generate / refresh", GUILayout.Width(160))) GenerateEntityAssets();
+            var groups = new (string title, System.Type type)[] {
+                ("Characters", typeof(StoryloomCharacterAsset)), ("Items", typeof(StoryloomItemAsset)),
+                ("Locations", typeof(StoryloomLocationAsset)), ("Discoverables", typeof(StoryloomDiscoverableAsset)) };
+            foreach (var (title, type) in groups)
+            {
+                var list = map.Values.Where(a => a.GetType() == type).OrderBy(a => a.DisplayName).ToList();
+                if (list.Count == 0) continue;
+                GUILayout.Space(6); EditorGUILayout.LabelField(title, EditorStyles.boldLabel);
+                foreach (var a in list) EntityRow(a);
+            }
+        }
+        void EntityRow(StoryloomEntityAsset a)
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                var rect = GUILayoutUtility.GetRect(new GUIContent(a.DisplayName), EditorStyles.label, GUILayout.ExpandWidth(true), GUILayout.Height(18));
+                GUI.Label(rect, (a.Exists ? "≡ " : "≡ (missing) ") + a.DisplayName, a.Exists ? EditorStyles.label : EditorStyles.centeredGreyMiniLabel);
+                EditorGUIUtility.AddCursorRect(rect, MouseCursor.MoveArrow);
+                var e = Event.current;
+                if (e.type == EventType.MouseDrag && rect.Contains(e.mousePosition))
+                {
+                    DragAndDrop.PrepareStartDrag();
+                    DragAndDrop.objectReferences = new Object[] { a };
+                    DragAndDrop.StartDrag(a.DisplayName);
+                    e.Use();
+                }
+                if (GUILayout.Button("Ping", GUILayout.Width(44))) { EditorGUIUtility.PingObject(a); Selection.activeObject = a; }
+            }
         }
 
         // ------------------------------------------------------------------ scene
@@ -449,6 +522,7 @@ namespace Storyloom.EditorTools
             var light = new GameObject("Directional Light", typeof(Light)); var lt = light.GetComponent<Light>(); lt.type = LightType.Directional; lt.intensity = 1.1f; light.transform.rotation = Quaternion.Euler(50, -30, 0);
             if (style == GameStyle.TopDown) BuildTopDownWorld(s, d); else Build3DWorld(s, d, style);
             MatchPropColliders(style != GameStyle.TopDown);   // bound prefabs made for the other style carry the wrong collider kind
+            StampEntityAssets();                              // reference the typed entity handles, not just bare ids (no-op if none generated)
             BuildUI(d, style);
             dirGo.AddComponent<StoryloomDebugHud>();
             Directory.CreateDirectory(Root + "/Scenes");
@@ -754,6 +828,7 @@ namespace Storyloom.EditorTools
                 }
             }
             var dir = Object.FindObjectOfType<StoryloomDirector>(); if (dir && !dir.GetComponent<StoryloomDebugHud>()) { dir.gameObject.AddComponent<StoryloomDebugHud>(); fixedCount++; }
+            fixedCount += StampEntityAssets();   // fill empty entity-asset references from ids (no-op when none are generated)
             if (swappedColliders.Count > 0) Debug.Log($"Storyloom repair: gave {swappedColliders.Count} object(s) the {(xz ? "3D" : "2D")} collider this style needs (they came from a prefab bound for the other style): " + string.Join(", ", swappedColliders));
             EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
             ShowNotification(new GUIContent($"Repaired {fixedCount} thing{(fixedCount == 1 ? "" : "s")}"));

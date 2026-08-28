@@ -19,8 +19,12 @@ namespace Storyloom.EditorTools
         static StoryloomDragAndDrop()
         {
             EditorApplication.hierarchyWindowItemOnGUI += OnHierarchyItem;
+            EditorApplication.projectWindowItemOnGUI += OnProjectItem;
             SceneView.duringSceneGui += OnSceneView;
         }
+
+        static Component Apply(StoryloomEntityAsset asset, GameObject go, bool alt) =>
+            asset is StoryloomLocationAsset loc && alt ? loc.ApplySignpost(go) : asset.ApplyTo(go);
 
         static StoryloomEntityAsset Dragged() => DragAndDrop.objectReferences.OfType<StoryloomEntityAsset>().FirstOrDefault();
 
@@ -33,6 +37,33 @@ namespace Storyloom.EditorTools
             var go = EditorUtility.InstanceIDToObject(instanceId) as GameObject; if (!go) return;
             DragAndDrop.visualMode = DragAndDropVisualMode.Link;
             if (e.type == EventType.DragPerform) { DragAndDrop.AcceptDrag(); Bind(asset, go, e.alt); }
+            e.Use();
+        }
+
+        // Drop an entity asset onto a *prefab* in the Project window: the prefab itself gains the wired component, so every
+        // instance of it everywhere becomes that entity. Only .prefab rows are intercepted — moving assets between folders,
+        // and every other Project-window drag, keeps its normal behaviour.
+        static void OnProjectItem(string guid, Rect rect)
+        {
+            var e = Event.current;
+            if (e.type != EventType.DragUpdated && e.type != EventType.DragPerform) return;
+            if (!rect.Contains(e.mousePosition)) return;
+            var asset = Dragged(); if (!asset) return;
+            var path = AssetDatabase.GUIDToAssetPath(guid);
+            if (!path.EndsWith(".prefab", System.StringComparison.OrdinalIgnoreCase)) return;
+            DragAndDrop.visualMode = DragAndDropVisualMode.Link;
+            if (e.type == EventType.DragPerform)
+            {
+                DragAndDrop.AcceptDrag();
+                var root = PrefabUtility.LoadPrefabContents(path);
+                try
+                {
+                    var c = Apply(asset, root, e.alt);
+                    PrefabUtility.SaveAsPrefabAsset(root, path);
+                    Debug.Log($"Storyloom: bound '{asset.DisplayName}' → prefab '{path}' ({c.GetType().Name}) — every instance of it is now this entity", AssetDatabase.LoadAssetAtPath<GameObject>(path));
+                }
+                finally { PrefabUtility.UnloadPrefabContents(root); }
+            }
             e.Use();
         }
 
@@ -55,7 +86,7 @@ namespace Storyloom.EditorTools
         static void Bind(StoryloomEntityAsset asset, GameObject go, bool alt)
         {
             Undo.RegisterFullObjectHierarchyUndo(go, "Storyloom: bind " + asset.DisplayName);
-            var c = asset is StoryloomLocationAsset loc && alt ? loc.ApplySignpost(go) : asset.ApplyTo(go);
+            var c = Apply(asset, go, alt);
             EditorUtility.SetDirty(go); MarkDirty(go);
             Debug.Log($"Storyloom: bound '{asset.DisplayName}' → {go.name} ({c.GetType().Name})", go);
         }
