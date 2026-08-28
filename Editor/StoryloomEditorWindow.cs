@@ -33,6 +33,7 @@ namespace Storyloom.EditorTools
                 {
                     if (GUILayout.Button("Re-sync from story", GUILayout.Height(26))) { Undo.RecordObject(_b, "Sync"); int n = _b.SyncFromStory(); EditorUtility.SetDirty(_b); ShowNotification(new GUIContent($"{n} new entr{(n == 1 ? "y" : "ies")}")); }
                     if (GUILayout.Button("Create placeholder prefabs", GUILayout.Height(26))) CreatePlaceholders();
+                    if (GUILayout.Button("Generate entity assets", GUILayout.Height(26))) GenerateEntityAssets();
                     // if (GUILayout.Button("Create Stardew-style scene", GUILayout.Height(26))) CreateScene();
                     if (GUILayout.Button("Create test scene", GUILayout.Height(26))) CreateScene(_b.gameStyle);
                     if (GUILayout.Button("Repair open scene", GUILayout.Height(26))) RepairScene();
@@ -252,6 +253,41 @@ namespace Storyloom.EditorTools
             foreach (var i in _b.items) if (i.icon == null) i.icon = itemS;
             foreach (var d in _b.discoverables) if (d.worldSprite == null) d.worldSprite = discS;
             EditorUtility.SetDirty(_b); AssetDatabase.SaveAssets(); ShowNotification(new GUIContent("Placeholders created"));
+        }
+
+        // ------------------------------------------------------------------ entity assets
+        // One ScriptableObject per character / item / location / discoverable — the typed handles you drag onto GameObjects
+        // (hierarchy, scene view, or a component's asset field) to wire your own prefabs to the story. Assets are matched by
+        // entityId, so re-importing the story and re-running this renames them but never breaks a scene reference; nothing
+        // is ever deleted here (an entity removed upstream keeps its asset, flagged by the inspector as missing).
+        static string SafeFileName(string s) { foreach (var c in Path.GetInvalidFileNameChars()) s = s.Replace(c, '-'); return string.IsNullOrWhiteSpace(s) ? "unnamed" : s.Trim(); }
+        void GenerateEntityAssets()
+        {
+            var s = _b.story.Story; var root = Root + "/Entities"; int created = 0, updated = 0;
+            T Ensure<T>(string folder, string id, string nm) where T : StoryloomEntityAsset
+            {
+                Directory.CreateDirectory($"{root}/{folder}");
+                var existing = AssetDatabase.FindAssets("t:" + typeof(T).Name, new[] { root })
+                    .Select(g => AssetDatabase.LoadAssetAtPath<T>(AssetDatabase.GUIDToAssetPath(g)))
+                    .FirstOrDefault(a => a && a.entityId == id);
+                if (existing == null)
+                {
+                    existing = CreateInstance<T>(); existing.entityId = id;
+                    AssetDatabase.CreateAsset(existing, AssetDatabase.GenerateUniqueAssetPath($"{root}/{folder}/{SafeFileName(nm)}.asset")); created++;
+                }
+                else updated++;
+                existing.story = _b.story; existing.bindings = _b;
+                var want = SafeFileName(nm);
+                if (existing.name != want && !AssetDatabase.LoadAssetAtPath<T>($"{root}/{folder}/{want}.asset")) AssetDatabase.RenameAsset(AssetDatabase.GetAssetPath(existing), want);
+                EditorUtility.SetDirty(existing); return existing;
+            }
+            foreach (var c in s.characters ?? new Character[0]) Ensure<StoryloomCharacterAsset>("Characters", c.id, c.name);
+            foreach (var i in s.items ?? new Item[0]) Ensure<StoryloomItemAsset>("Items", i.id, i.name);
+            foreach (var l in s.locations ?? new Location[0]) Ensure<StoryloomLocationAsset>("Locations", l.id, l.name);
+            foreach (var n in (s.nodes ?? new StoryNode[0]).Where(n => n.IsDiscoverable)) Ensure<StoryloomDiscoverableAsset>("Discoverables", n.id, n.title);
+            AssetDatabase.SaveAssets();
+            ShowNotification(new GUIContent($"Entity assets: {created} created, {updated} refreshed"));
+            EditorUtility.FocusProjectWindow(); Selection.activeObject = AssetDatabase.LoadAssetAtPath<Object>(root);
         }
 
         // ------------------------------------------------------------------ scene

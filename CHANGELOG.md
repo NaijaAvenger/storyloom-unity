@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0
+- **Entity assets: the story as drag-and-drop ScriptableObjects.** *Generate entity assets* (window toolbar) creates one asset per character / item / location / discoverable under `Assets/Storyloom/Entities/` — typed handles that resolve the live story data and bindings (`.Data`, `.DisplayName`, `.Portrait`, `.Prefab`…), never copies of it. Matched by entity id, so re-importing the story updates them in place and never breaks a scene reference.
+- Drag an entity asset onto a GameObject (Hierarchy or Scene view) and it gains the matching interactable wired to that entity; Alt-drop a location for a `Signpost` instead of a zone; drop onto empty ground in the Scene view to spawn the bound prefab (or placeholder) at that point, on the right plane for the current style. `asset.ApplyTo(go)` does the same from code.
+- `NpcInteractable` / `ItemPickup` / `DiscoverableInteractable` / `LocationTrigger` / `Signpost` gained an asset field beside their id string; the asset, when set, keeps the id in sync (OnValidate and Awake). Bare id strings keep working — assets are a layer on top, not a migration.
+- Entity-asset inspector shows what the handle resolves to and warns when the id no longer exists in the story or the story/bindings references are missing.
+
 ## 0.4.6
 - **Reach is measured to colliders, not pivots.** `Interactable` caches its colliders and `Interactable.Nearest` scores candidates by the distance to the nearest point on them. The range test now happens *while* the winner is chosen (`Nearest(..., maxDistance)`) instead of rejecting the winner afterwards — that rejection is what made top-down interaction feel random: an object in reach was silently dropped whenever a slightly-better-facing one just outside reach won the score.
 - **Top-down movement runs in the physics step.** `PlayerController2D` sets `Rigidbody2D.velocity` in `FixedUpdate` (Update only records the intent), and the body is created with *never sleep* + interpolation + continuous detection. A sleeping 2D body stops emitting trigger enter/exit, which is how zone arrivals went missing after standing still. The 2D physics fallback for focus now picks the nearest hit rather than an arbitrary one.

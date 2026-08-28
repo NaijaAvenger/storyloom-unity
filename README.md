@@ -65,6 +65,18 @@ What the export does **not** do on its own: it has no idea what a "character" lo
 4. **Validate.** The *Validate* tab lists anything unbound, dangling links, missing locations, unreachable nodes, engine events you'll need to handle, and "who says what where" per character.
 5. **Create test scene.** Pick a **Game style** first — *Top-down (Stardew)*, *Third person* or *First person* — then build. Every style gets the same director, interactables and UI; only the player, camera and world plane differ (see *Game styles* below). Builds a scene: camera with smooth follow, player, `StoryloomDirector`, one cluster per location (floor, trigger volume, signpost) with the NPCs whose home is there (or who speak there), items given there, and discoverables hosted at beats set there; anything unplaced lands in a *Backstage* cluster; plus the full UI. Press Play.
 
+## Entity assets — drag-and-drop into your own project
+
+The test scene is one use of the data; the other is wiring the story into a game you're already building. **Generate entity assets** (in the window's toolbar) creates one ScriptableObject per character, item, location and discoverable under `Assets/Storyloom/Entities/`. Each asset is a *typed handle* into the story — it carries the entity's id plus references to the story and bindings assets, and resolves everything live (`.Data`, `.DisplayName`, `.Portrait`, `.Prefab`…). Nothing is copied, so there is exactly one source of truth: re-import the story and every asset sees the new data; assets are matched by id, so renames upstream just rename the file and never break a scene reference.
+
+Then wire things up by dragging:
+
+- **Onto a GameObject** (Hierarchy or Scene view): the object gains the matching component, wired to that entity — `NpcInteractable` for a character, `ItemPickup` for an item, `DiscoverableInteractable` for a discoverable, `LocationTrigger` (plus a trigger volume, on the right physics plane for the current style) for a location. **Alt-drop** a location to get a `Signpost` instead. Your own components, colliders and visuals are left alone; an existing interactable of that kind is rebound rather than duplicated.
+- **Onto empty ground in the Scene view**: the entity's bound prefab (or the default placeholder) is spawned at the drop point, wired.
+- **Into a component's asset field**: every interactable now has an asset slot (`character`, `item`, `discoverable`, `location`) next to its id string; drop an asset in and the id follows it, in the editor and again at runtime — so a prefab holding an `NpcInteractable` with a character asset assigned *is* that character, dialogue, gating and all.
+
+From your own tooling, `asset.ApplyTo(gameObject)` does the same thing in code. The interactables keep working from bare id strings too — assets are a convenience layer, not a requirement.
+
 ## Game styles
 
 The same story can be test-played three ways. The choice is stored on the Bindings asset (`gameStyle`) and shown as a toolbar in the window; **Create test scene** builds the matching scene and swaps the *default* placeholder prefabs to the matching kind (your own prefabs are never touched — 3D placeholders live in `Placeholders/3D/`).

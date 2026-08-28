@@ -94,17 +94,26 @@ namespace Storyloom
 
     public class NpcInteractable : Interactable
     {
+        [Tooltip("Drag a character entity asset here (Window ▸ Storyloom ▸ Generate entity assets) — it keeps characterId in sync")]
+        public StoryloomCharacterAsset character;
         public string characterId;
         [Tooltip("Optional: beats to try first, in order (node ids). Otherwise the director picks the best unplayed beat for this character here.")]
         public List<string> preferredNodeIds = new List<string>();
         public override string Verb => "Talk";
+        // The asset is the stronger claim: whoever dragged it in meant *that* character, whatever the string said before.
+        protected override void Awake() { if (character) characterId = character.entityId; base.Awake(); }
+        void OnValidate() { if (character) characterId = character.entityId; }
         protected override void OnInteract(StoryloomPlayer p) { if (D) D.TalkTo(characterId, preferredNodeIds.Count > 0 ? preferredNodeIds : null); }
     }
 
     public class ItemPickup : Interactable
     {
+        [Tooltip("Drag an item entity asset here — it keeps itemId in sync")]
+        public StoryloomItemAsset item;
         public string itemId;
         public bool destroyOnPickup = true;
+        protected override void Awake() { if (item) itemId = item.entityId; base.Awake(); }
+        void OnValidate() { if (item) itemId = item.entityId; }
         public override string Verb => "Pick up";
         protected override void OnInteract(StoryloomPlayer p) { if (D) { var beat = D.GivingBeat(itemId); if (beat != null && D.strictOrder && !D.Played.Contains(beat.id) && !D.Available(beat)) { if (D.dialogue) D.dialogue.ShowBark("", "Not yet — this belongs to a part of the story you haven't reached.", null); return; } D.Pickup(itemId); } if (destroyOnPickup) Destroy(gameObject); else gameObject.SetActive(false); }
         void Start() { if (D && D.Runner != null && D.Runner.HasItem(itemId) && destroyOnPickup) Destroy(gameObject); }   // already owned (e.g. after a load)
@@ -112,8 +121,12 @@ namespace Storyloom
 
     public class DiscoverableInteractable : Interactable
     {
+        [Tooltip("Drag a discoverable entity asset here — it keeps nodeId in sync")]
+        public StoryloomDiscoverableAsset discoverable;
         public string nodeId;
         public bool onceOnly = true;
+        protected override void Awake() { if (discoverable) nodeId = discoverable.entityId; base.Awake(); }
+        void OnValidate() { if (discoverable) nodeId = discoverable.entityId; }
         [Tooltip("Optional: a TextMesh under this object that shows the title, kind and reward (the placeholder prefab has one)")] public TextMesh label;
         public override string Verb => "Examine";
         StoryNode Node => D ? D.Story.GetNode(nodeId) : null;
@@ -146,7 +159,11 @@ namespace Storyloom
     // A trigger volume (2D collider for top-down scenes, 3D collider for the third-/first-person scenes) that tells the director where the player is.
     public class LocationTrigger : MonoBehaviour
     {
+        [Tooltip("Drag a location entity asset here — it keeps locationId in sync")]
+        public StoryloomLocationAsset location;
         public string locationId;
+        void Awake() { if (location) locationId = location.entityId; }
+        void OnValidate() { if (location) locationId = location.entityId; }
         [Tooltip("How often the zone re-checks whether the player is inside (seconds). The poll backs up the physics trigger events, which CharacterControllers and sleeping bodies can miss.")]
         public float pollInterval = 0.1f;
         [Tooltip("Slack added to the volume once the player is inside, so standing on the boundary doesn't flip the zone (and re-show the banner) over and over.")]
@@ -235,8 +252,12 @@ namespace Storyloom
 
     public class Signpost : Interactable
     {
+        [Tooltip("Drag a location entity asset here — it keeps locationId in sync")]
+        public StoryloomLocationAsset location;
         public string locationId;
         public override string Verb => "Read";
+        protected override void Awake() { if (location) locationId = location.entityId; base.Awake(); }
+        void OnValidate() { if (location) locationId = location.entityId; }
         protected override void OnInteract(StoryloomPlayer p)
         {
             if (!D) return; var loc = D.Story.GetLocation(locationId); if (loc == null) { StoryloomDirector.Note("Signpost: location " + locationId + " not in the story"); return; }
