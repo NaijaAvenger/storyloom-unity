@@ -138,7 +138,7 @@ namespace Storyloom
             Runner.ResetVariables(); bindings.ApplyStartingValues(Runner);
         }
         /// <summary>Reset variables and apply the editor's starting-value overrides.</summary>
-        public void ResetStory() { Runner.ResetVariables(); bindings.ApplyStartingValues(Runner); Played.Clear(); PendingNodeId = ""; }
+        public void ResetStory() { Runner.ResetVariables(); bindings.ApplyStartingValues(Runner); Played.Clear(); PendingNodeId = ""; TalkVisits.Clear(); SaidBarks.Clear(); }
 
         void Start()
         {
@@ -222,7 +222,7 @@ namespace Storyloom
                 ?? ok.Where(here).OrderBy(FlowIndex).FirstOrDefault()
                 ?? ok.OrderBy(FlowIndex).FirstOrDefault();
         }
-        bool Ok(StoryNode n) { if (n == null) return false; if (n.IsCheck) return true; return Runner.Evaluate(n.conditions, n.conditionMode, out _); }
+        bool Ok(StoryNode n) { if (n == null) return false; if (!Runner.TagsOk(n.behaviorTagIds)) return false; if (n.IsCheck) return true; return Runner.Evaluate(n.conditions, n.conditionMode, out _); }   // behavior tags gate every beat
         int FlowIndex(StoryNode n) => Array.IndexOf(Story.nodes, n);   // export order = reading order from Storyloom
 
         // ------------------------------------------------------------------ playing
@@ -238,11 +238,51 @@ namespace Storyloom
             if (n == null)
             {
                 var c = Story.GetCharacter(characterId); var nm = c != null ? c.name : "?";
-                bool hasLater = strictOrder && Story.nodes.Any(x => !x.IsDiscoverable && !Played.Contains(x.id) && Involves(x, characterId));   // they have lines, just not yet
+                // idle / revisit lines: authored per character in Storyloom (conditions outrank everything, then exact visit number, then priority)
+                var visit = (TalkVisits.TryGetValue(characterId, out var v0) ? v0 : 0) + 1;
+                var bark = PickBark(c, visit);
+                if (bark != null)
+                {
+                    TalkVisits[characterId] = visit; if (bark.once) SaidBarks.Add(BarkKey(c, bark));
+                    Note($"TalkTo {nm}: idle line (visit {visit}{(bark.conditions != null && bark.conditions.Length > 0 ? ", conditional" : "")}, priority {bark.priority})");
+                    Dialogue?.ShowBark(nm, bark.text, Portrait(characterId));
+                    return;
+                }
+                bool hasLater = strictOrder && Story.nodes.Any(x => !x.IsDiscoverable && !Played.Contains(x.id) && Involves(x, characterId) && Runner.TagsOk(x.behaviorTagIds));   // they have lines, just not yet (tag-disabled beats don't count)
                 Dialogue?.ShowBark(nm, hasLater ? "…" + nm + " has nothing to say to you yet." : "...", Portrait(characterId));
                 return;
             }
             PlayNode(n.id);
+        }
+
+        /// <summary>How many idle/revisit lines each character has delivered (the "visit number"). Saved with the game.</summary>
+        public readonly Dictionary<string, int> TalkVisits = new Dictionary<string, int>();
+        /// <summary>Ids of once-only idle lines already said. Saved with the game.</summary>
+        public readonly HashSet<string> SaidBarks = new HashSet<string>();
+        static string BarkKey(Character c, Bark b) => string.IsNullOrEmpty(b.id) ? (c != null ? c.id : "?") + ":" + b.text : b.id;
+        /// <summary>The idle line this character would say on this visit, or null. Selection: conditional lines whose conditions pass
+        /// first (by priority), then lines pinned to this exact visit number (by priority), then any-visit lines by priority —
+        /// cycling through equal-priority any-visit lines by visit count so repeats vary.</summary>
+        public Bark PickBark(Character c, int visit)
+        {
+            if (c == null || c.barks == null || c.barks.Length == 0) return null;
+            var open = new List<Bark>();
+            foreach (var b in c.barks)
+            {
+                if (b == null || string.IsNullOrEmpty(b.text)) continue;
+                if (b.once && SaidBarks.Contains(BarkKey(c, b))) continue;
+                if (b.conditions != null && b.conditions.Length > 0 && !Runner.Evaluate(b.conditions, string.IsNullOrEmpty(b.conditionMode) ? "all" : b.conditionMode, out _)) continue;
+                open.Add(b);
+            }
+            if (open.Count == 0) return null;
+            var conditional = open.Where(b => b.conditions != null && b.conditions.Length > 0).OrderByDescending(b => b.priority).ToList();
+            if (conditional.Count > 0) return conditional[0];
+            var exact = open.Where(b => b.visit == visit).OrderByDescending(b => b.priority).ToList();
+            if (exact.Count > 0) return exact[0];
+            var any = open.Where(b => b.visit <= 0).OrderByDescending(b => b.priority).ToList();
+            if (any.Count == 0) return null;
+            int top = any[0].priority; var ties = any.Where(b => b.priority == top).ToList();
+            return ties[(visit - 1) % ties.Count];   // rotate through the best general lines so revisits don't repeat verbatim
         }
 
         /// <summary>Beats that lead into `n`: links, jumps, and (for discoverables) the host.</summary>
@@ -420,6 +460,7 @@ namespace Storyloom
             if (locationId == CurrentLocationId) { if (fromWorld && !InBeat) ResumeHere(locationId); return; }
             _talkingTo = "";
             CurrentLocationId = locationId;
+            Runner.VisitLocation(locationId);   // 'visited X' / 'currently in X' conditions (nodes, options and idle lines) read this
             var loc = Story.GetLocation(locationId); var b = bindings.Location(locationId);
             // A story beat moving the location shows the banner but deliberately does *not* claim the latch: the latch belongs to
             // where the player's body is, so walking there afterwards still gets its own arrival popup.
@@ -468,8 +509,8 @@ namespace Storyloom
         AudioClip Bark(string characterId) { var b = bindings.Character(characterId); return b != null ? b.voiceBark : null; }
 
         // ------------------------------------------------------------------ save / load
-        public string SaveJson() { var st = Runner.SnapshotState(); return JsonUtility.ToJson(new SaveBlob { runner = st, played = Played.ToList(), location = CurrentLocationId, pending = PendingNodeId }); }
-        public void LoadJson(string json) { var b = JsonUtility.FromJson<SaveBlob>(json); Runner.RestoreState(b.runner); Played.Clear(); foreach (var p in b.played) Played.Add(p); CurrentLocationId = b.location; PendingNodeId = b.pending ?? ""; Inventory?.Refresh(); }
-        [Serializable] class SaveBlob { public StoryRunnerState runner; public List<string> played; public string location; public string pending; }
+        public string SaveJson() { var st = Runner.SnapshotState(); return JsonUtility.ToJson(new SaveBlob { runner = st, played = Played.ToList(), location = CurrentLocationId, pending = PendingNodeId, visitKeys = TalkVisits.Keys.ToList(), visitCounts = TalkVisits.Values.ToList(), saidBarks = SaidBarks.ToList() }); }
+        public void LoadJson(string json) { var b = JsonUtility.FromJson<SaveBlob>(json); Runner.RestoreState(b.runner); Played.Clear(); foreach (var p in b.played) Played.Add(p); CurrentLocationId = b.location; PendingNodeId = b.pending ?? ""; TalkVisits.Clear(); if (b.visitKeys != null) for (int i = 0; i < b.visitKeys.Count && i < b.visitCounts.Count; i++) TalkVisits[b.visitKeys[i]] = b.visitCounts[i]; SaidBarks.Clear(); if (b.saidBarks != null) foreach (var x in b.saidBarks) SaidBarks.Add(x); Inventory?.Refresh(); }
+        [Serializable] class SaveBlob { public StoryRunnerState runner; public List<string> played; public string location; public string pending; public List<string> visitKeys; public List<int> visitCounts; public List<string> saidBarks; }
     }
 }

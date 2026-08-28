@@ -150,7 +150,8 @@ namespace Storyloom
                 if (n.options == null) return result;
                 foreach (var opt in n.options)
                 {
-                    string optLock = Evaluate(opt.conditions, opt.conditionMode, out _) ? null : Reason(opt.conditions, opt.conditionMode);
+                    // string optLock = Evaluate(opt.conditions, opt.conditionMode, out _) ? null : Reason(opt.conditions, opt.conditionMode);
+                    string optLock = (Evaluate(opt.conditions, opt.conditionMode, out _) ? null : Reason(opt.conditions, opt.conditionMode)) ?? TagLockReason(opt.behaviorTagIds);
                     foreach (var l in n.LinksFrom(opt.id))
                     {
                         var o = MakeOption(l, opt.label, opt);
@@ -179,8 +180,10 @@ namespace Storyloom
             if (Current == null || Current.IsDiscoverable) return result;
             foreach (var d in Story.DiscoverablesAt(Current.id))
             {
-                bool ok = Evaluate(d.conditions, d.conditionMode, out _);
-                result.Add(new StoryOption { label = d.title, target = d, isDiscoverable = true, found = History.Contains(d.id), locked = !ok, lockReason = ok ? null : Reason(d.conditions, d.conditionMode) });
+                // bool ok = Evaluate(d.conditions, d.conditionMode, out _);
+                bool ok = Evaluate(d.conditions, d.conditionMode, out _) && TagsOk(d.behaviorTagIds);
+                string why = ok ? null : (Evaluate(d.conditions, d.conditionMode, out _) ? TagLockReason(d.behaviorTagIds) : Reason(d.conditions, d.conditionMode));
+                result.Add(new StoryOption { label = d.title, target = d, isDiscoverable = true, found = History.Contains(d.id), locked = !ok, lockReason = why });
             }
             return result;
         }
@@ -206,19 +209,70 @@ namespace Storyloom
             if (target == null) { o.locked = true; o.lockReason = "link target missing"; return o; }
             if (!Evaluate(link.conditions, link.conditionMode, out _)) { o.locked = true; o.lockReason = Reason(link.conditions, link.conditionMode); return o; }
             // Entry requirements on the target (Check nodes use their conditions for branching, not gating).
-            if (!target.IsCheck && !Evaluate(target.conditions, target.conditionMode, out _)) { o.locked = true; o.lockReason = Reason(target.conditions, target.conditionMode); }
+            if (!target.IsCheck && !Evaluate(target.conditions, target.conditionMode, out _)) { o.locked = true; o.lockReason = Reason(target.conditions, target.conditionMode); return o; }
+            // Behavior tags on the target: off = unavailable, whatever else passed.
+            var tagLock = TagLockReason(target.behaviorTagIds);
+            if (tagLock != null) { o.locked = true; o.lockReason = tagLock; }
             return o;
         }
 
         // ------------------------------------------------------------------ variables
 
         public const string ItemPrefix = "item:";
+        // Namespaced state (export v2.2) — everything lives in Variables so conditions, effects and saves all see it:
+        //   loc:<id> / region:<id>  → bool, true once visited;  __loc / __region → id of where the story currently is
+        //   lore:<id>               → bool, true once learned (effect "learn"/"forget")
+        //   tag:<id>                → bool, behavior tag active (effects enable/disable/toggle; missing = active)
+        //   mood:<characterId>      → string, set by mood effects; conditions compare with == / !=
+        public const string LocPrefix = "loc:";
+        public const string RegionPrefix = "region:";
+        public const string LorePrefix = "lore:";
+        public const string TagPrefix = "tag:";
+        public const string MoodPrefix = "mood:";
+        public const string CurrentLocKey = "__loc";
+        public const string CurrentRegionKey = "__region";
 
         public void ResetVariables()
         {
             Variables.Clear();
             foreach (var v in _varDecl.Values) Variables[v.name] = Coerce(v, v.defaultValue);
             if (Story.items != null) foreach (var it in Story.items) Variables[ItemPrefix + it.id] = it.startOwned;
+            if (Story.lore != null) foreach (var l in Story.lore) Variables[LorePrefix + l.id] = false;
+            if (Story.behaviorTags != null) foreach (var t in Story.behaviorTags) Variables[TagPrefix + t.id] = t.startsOn;
+            Variables[CurrentLocKey] = ""; Variables[CurrentRegionKey] = "";
+        }
+
+        /// <summary>Mark a location (and its region chain) as current + visited. The kit's director calls this from SetLocation.</summary>
+        public void VisitLocation(string locId)
+        {
+            if (string.IsNullOrEmpty(locId)) return;
+            Variables[CurrentLocKey] = locId; Variables[LocPrefix + locId] = true;
+            var loc = Story.GetLocation(locId); bool first = true;
+            if (loc != null) foreach (var r in Story.RegionsOf(loc)) { if (first) { Variables[CurrentRegionKey] = r.id; first = false; } Variables[RegionPrefix + r.id] = true; }
+        }
+
+        /// <summary>True while every behavior tag in `ids` is active (a tag missing from Variables counts as active).</summary>
+        public bool TagsOk(string[] ids)
+        {
+            if (ids == null || ids.Length == 0) return true;
+            foreach (var t in ids) if (Variables.TryGetValue(TagPrefix + t, out var v) && v is bool b && !b) return false;
+            return true;
+        }
+        /// <summary>Lock text for a node/option whose behavior tags are off; null when open.</summary>
+        public string TagLockReason(string[] ids)
+        {
+            if (TagsOk(ids)) return null;
+            var off = new List<string>();
+            foreach (var t in ids) if (Variables.TryGetValue(TagPrefix + t, out var v) && v is bool b && !b) { var bt = Story.GetBehaviorTag(t); off.Add(bt != null ? bt.name : t); }
+            return "tag " + string.Join(", ", off) + " is off";
+        }
+        // is the current location inside region `rid` (directly or via parents)?
+        private bool RegionHolds(string rid)
+        {
+            var locId = GetString(CurrentLocKey); if (string.IsNullOrEmpty(locId) || string.IsNullOrEmpty(rid)) return false;
+            var loc = Story.GetLocation(locId); if (loc == null) return false;
+            foreach (var r in Story.RegionsOf(loc)) if (r.id == rid) return true;
+            return false;
         }
 
         // ---- inventory: items live in Variables as "item:<id>" → bool, so conditions, effects and save states all see them ----
@@ -255,6 +309,15 @@ namespace Storyloom
                     if (e.op == "take") TakeItem(e.variable.Substring(ItemPrefix.Length)); else GiveItem(e.variable.Substring(ItemPrefix.Length));
                     continue;
                 }
+                if (e.variable.StartsWith(LorePrefix)) { Variables[e.variable] = e.op != "forget"; OnVariableChanged?.Invoke(e.variable, Variables[e.variable]); continue; }
+                if (e.variable.StartsWith(TagPrefix))
+                {
+                    bool curOn = !(Variables.TryGetValue(e.variable, out var tv) && tv is bool tb && !tb);
+                    Variables[e.variable] = e.op == "toggle" ? !curOn : e.op != "disable" && e.op != "deactivate";
+                    OnVariableChanged?.Invoke(e.variable, Variables[e.variable]); continue;
+                }
+                if (e.variable.StartsWith(MoodPrefix)) { Variables[e.variable] = e.value ?? ""; OnVariableChanged?.Invoke(e.variable, Variables[e.variable]); continue; }
+                if (e.variable.StartsWith(LocPrefix) || e.variable.StartsWith(RegionPrefix)) continue;   // visits come from playing, not effects
                 _varDecl.TryGetValue(e.variable, out var decl);
                 object cur = Get(e.variable);
                 switch (e.op)
@@ -294,6 +357,26 @@ namespace Storyloom
             {
                 bool has = HasItem(c.variable.Substring(ItemPrefix.Length));
                 return c.op == "lacks" ? !has : has;
+            }
+            if (c.variable.StartsWith(LocPrefix) || c.variable.StartsWith(RegionPrefix))
+            {
+                bool isRegion = c.variable.StartsWith(RegionPrefix);
+                string id = c.variable.Substring(c.variable.IndexOf(':') + 1);
+                bool inNow = isRegion ? RegionHolds(id) : GetString(CurrentLocKey) == id;
+                if (c.op == "currently in") return inNow;
+                if (c.op == "not in") return !inNow;
+                bool visited = GetBool(c.variable);
+                return c.op == "not visited" ? !visited : visited;
+            }
+            if (c.variable.StartsWith(LorePrefix)) { bool knows = GetBool(c.variable); return c.op == "doesn't know" ? !knows : knows; }
+            if (c.variable.StartsWith(TagPrefix)) { bool on = !(Variables.TryGetValue(c.variable, out var tv) && tv is bool tb && !tb); return c.op == "inactive" ? !on : on; }
+            if (c.variable.StartsWith(MoodPrefix))
+            {
+                string moodNow = GetString(c.variable);   // named moodNow, not cur: the method body declares `object cur` below and C# forbids the nested shadow
+                if (c.op == "is set") return moodNow.Length > 0;
+                if (c.op == "not set") return moodNow.Length == 0;
+                bool eq = string.Equals(moodNow, c.value ?? "", StringComparison.OrdinalIgnoreCase);
+                return c.op == "!=" ? !eq : eq;
             }
             _varDecl.TryGetValue(c.variable, out var decl);
             object cur = Get(c.variable);
@@ -341,6 +424,27 @@ namespace Storyloom
                 {
                     var it = Story.GetItem(c.variable.Substring(ItemPrefix.Length));
                     parts.Add((c.op == "lacks" ? "lacks " : "has ") + (it != null ? it.name : c.variable));
+                }
+                else if (c.variable != null && (c.variable.StartsWith(LocPrefix) || c.variable.StartsWith(RegionPrefix)))
+                {
+                    string id = c.variable.Substring(c.variable.IndexOf(':') + 1);
+                    var loc = Story.GetLocation(id); var reg = Story.GetRegion(id);
+                    parts.Add(c.op + " " + (loc != null ? loc.name : reg != null ? reg.name : id));
+                }
+                else if (c.variable != null && c.variable.StartsWith(LorePrefix))
+                {
+                    var lo = Story.GetLore(c.variable.Substring(LorePrefix.Length));
+                    parts.Add((c.op == "doesn't know" ? "doesn't know " : "knows ") + (lo != null ? lo.name : c.variable));
+                }
+                else if (c.variable != null && c.variable.StartsWith(TagPrefix))
+                {
+                    var bt = Story.GetBehaviorTag(c.variable.Substring(TagPrefix.Length));
+                    parts.Add("tag " + (bt != null ? bt.name : c.variable) + " " + (c.op == "inactive" ? "off" : "on"));
+                }
+                else if (c.variable != null && c.variable.StartsWith(MoodPrefix))
+                {
+                    var ch = Story.GetCharacter(c.variable.Substring(MoodPrefix.Length));
+                    parts.Add((ch != null ? ch.name : c.variable) + " mood " + c.op + " " + c.value);
                 }
                 else parts.Add(c.ToString());
             }

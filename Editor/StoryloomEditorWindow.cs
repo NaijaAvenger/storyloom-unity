@@ -30,9 +30,9 @@ namespace Storyloom.EditorTools
             FlowButtons(26,
                 ("Import story JSON…", true, (System.Action)ImportJson),
                 ("Re-sync from story", hasB, () => { Undo.RecordObject(_b, "Sync"); int n = _b.SyncFromStory(); EditorUtility.SetDirty(_b); ShowNotification(new GUIContent($"{n} new entr{(n == 1 ? "y" : "ies")}")); }),
-                ("Create placeholder prefabs", hasB, () => CreatePlaceholders()),
-                ("Generate entity assets", hasB, (System.Action)GenerateEntityAssets),
-                ("Create test scene", hasB, () => CreateScene(_b.gameStyle)),
+                ("Create placeholder prefabs", hasB && !Application.isPlaying, () => CreatePlaceholders()),
+                ("Generate entity assets", hasB && !Application.isPlaying, (System.Action)GenerateEntityAssets),
+                ("Create test scene", hasB && !Application.isPlaying, () => CreateScene(_b.gameStyle)),
                 ("Repair open scene", hasB, (System.Action)RepairScene));
             FlowButtons(20,
                 ("Self-test (play mode)", hasB && Application.isPlaying, (System.Action)SelfTest),
@@ -604,6 +604,11 @@ namespace Storyloom.EditorTools
         void CreateScene() => CreateScene(_b.gameStyle);
         void CreateScene(GameStyle style)
         {
+            if (Application.isPlaying) { EditorUtility.DisplayDialog("Storyloom", "Exit play mode before creating a test scene.", "OK"); return; }
+            // Generation always starts from a brand-new empty scene — mixing new content into a scene that already holds an
+            // older generated world is what produced broken interactions and phantom repairs. The prompt keeps unsaved work
+            // in the currently open scene from being silently discarded by NewScene (Cancel aborts generation).
+            if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) { ShowNotification(new GUIContent("Scene creation cancelled")); return; }
             CreatePlaceholders(style);   // (re)creates the defaults for this style; leaves your own prefabs alone
             var s = _b.story.Story;
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
@@ -627,7 +632,10 @@ namespace Storyloom.EditorTools
             var suffix = style == GameStyle.TopDown ? "Top-down kit" : style == GameStyle.ThirdPerson ? "Third person kit" : "First person kit";
             var scenePath = $"{Root}/Scenes/{s.name} ({suffix}).unity"; EditorSceneManager.SaveScene(scene, scenePath);
             RepairScene();   // fresh scenes go through the same pass Repair runs by hand: anything generation missed is fixed and saved immediately
-            ShowNotification(new GUIContent("Scene created & verified — press Play")); Selection.activeObject = dirGo;
+            var issues = VerifyScene();
+            if (issues.Count == 0) { Debug.Log("Storyloom: scene verification passed — player, camera driver, UI, EventSystem, zones and interactable colliders all check out."); ShowNotification(new GUIContent("Scene created & verified — press Play")); }
+            else { Debug.LogWarning("Storyloom: scene verification found " + issues.Count + " issue(s):\n  · " + string.Join("\n  · ", issues)); ShowNotification(new GUIContent($"Scene created — {issues.Count} issue(s), see Console")); }
+            Selection.activeObject = dirGo;
         }
 
         // ---- top-down (Stardew-style): XY plane, orthographic camera looking down -z, 2D physics
@@ -878,6 +886,58 @@ namespace Storyloom.EditorTools
             var mProg = MakeText(mapGo.transform, "Progress", "", 16, TextAnchor.LowerLeft, new Color(1, .9f, .7f));  Fit(mProg.gameObject, new Vector2(0, 0), new Vector2(1, 0), new Vector2(24, 12), new Vector2(-24, 36));
             var map = canvasGo.AddComponent<StoryMapUI>(); map.group = mg; map.titleText = mTitle; map.hereText = mHere; map.nextText = mNext; map.recentText = mRec; map.endingsText = mEnd; map.progressText = mProg; return map;
         }
+        // The post-build health check: everything play mode needs, verified while the console can still name it. Returns the
+        // issues found (empty = healthy) — the same classes of problem players hit as "interaction doesn't work", "no toast",
+        // "Tab does nothing", "camera static", "zone never fires".
+        List<string> VerifyScene()
+        {
+            var issues = new List<string>();
+            var d = Object.FindObjectOfType<StoryloomDirector>();
+            var player = Object.FindObjectOfType<StoryloomPlayer>();
+            bool xz = player && player.UsesXZ;
+            if (!d) issues.Add("no StoryloomDirector in the scene");
+            else
+            {
+                if (!d.bindings || d.bindings.story == null || d.bindings.story.Story == null) issues.Add("director has no bindings/story assigned");
+                if (d.Dialogue == null) issues.Add("no dialogue UI (built-in or IDialogueUI override)");
+                if (d.Toast == null) issues.Add("no pickup toast — 'Got X' popups can't show");
+                if (d.Inventory == null) issues.Add("no inventory UI — the inventory key can't open anything");
+                if (d.Banner == null) issues.Add("no location banner — zone arrival popups can't show");
+                if (d.dialogue && !d.dialogue.panel) issues.Add("DialogueUI exists but its panel reference is empty");
+                if (d.inventoryHud && !d.inventoryHud.panel) issues.Add("InventoryHUD exists but its panel reference is empty");
+                if (d.toast && !d.toast.group) issues.Add("PickupToast exists but its CanvasGroup reference is empty");
+                if (d.banner && !d.banner.group) issues.Add("LocationBanner exists but its CanvasGroup reference is empty");
+            }
+            if (!player) issues.Add("no Storyloom player in the scene");
+            else
+            {
+                if (_b && player.Style != _b.gameStyle) issues.Add($"player style is {player.Style} but the bindings' style is {_b.gameStyle} — regenerate, or switch the style back");
+                if (!xz && (!player.GetComponent<Rigidbody2D>() || !player.GetComponent<Collider2D>())) issues.Add("top-down player is missing its Rigidbody2D/Collider2D");
+                if (xz && !player.GetComponent<CharacterController>()) issues.Add("3D player is missing its CharacterController");
+                if (xz && !player.GetComponent<CursorLock>()) issues.Add("3D player has no CursorLock — the mouse won't be captured");
+                var cam = Camera.main;
+                if (!cam) issues.Add("no camera tagged MainCamera");
+                else if (player.Style == GameStyle.ThirdPerson && !cam.GetComponent<ThirdPersonCamera>() && !cam.transform.IsChildOf(player.transform)) issues.Add("third-person camera has no ThirdPersonCamera driver — it will sit static");
+                else if (player.Style == GameStyle.TopDown && !cam.GetComponent<SimpleFollow>() && !cam.transform.IsChildOf(player.transform)) issues.Add("top-down camera has no SimpleFollow — it won't track the player");
+                else if (player.Style == GameStyle.FirstPerson && !cam.transform.IsChildOf(player.transform)) issues.Add("first-person camera is not parented under the player");
+            }
+            if (!Object.FindObjectOfType<UnityEngine.EventSystems.EventSystem>()) issues.Add("no EventSystem — dialogue choice buttons won't click");
+            foreach (var z in Object.FindObjectsOfType<LocationTrigger>(true))
+            {
+                var c3 = z.GetComponent<Collider>(); var c2 = z.GetComponent<Collider2D>();
+                if (!c3 && !c2) { issues.Add($"zone '{z.name}' has no collider — it can never fire"); continue; }
+                if (xz && !c3) issues.Add($"zone '{z.name}' has a 2D collider in a 3D scene");
+                if (!xz && !c2) issues.Add($"zone '{z.name}' has a 3D collider in a top-down scene");
+                if ((c3 && !c3.isTrigger) || (c2 && !c2.isTrigger)) issues.Add($"zone '{z.name}' collider is SOLID, not a trigger");
+                if (xz && c3 && !z.GetComponent<Rigidbody>()) issues.Add($"zone '{z.name}' has no kinematic Rigidbody — CharacterController enter/exit is unreliable");
+            }
+            int wrongPlane = 0; string firstWrong = null;
+            foreach (var it in Object.FindObjectsOfType<Interactable>(true))
+                if (player && StoryloomColliders.NeedsPlaneFix(it.gameObject, xz)) { wrongPlane++; firstWrong = firstWrong ?? it.name; }
+            if (wrongPlane > 0) issues.Add($"{wrongPlane} interactable(s) have the wrong collider dimension for this style (e.g. '{firstWrong}') — interaction reach and clicks will misbehave; run Repair");
+            return issues;
+        }
+
         // Re-adds anything the kit needs in the open scene (older generated scenes, hand-built ones, missing-script prefabs):
         // missing UI (InventoryHUD / PickupToast / banner — the silent "Tab does nothing" case), world components, colliders, zones.
         void RepairScene()

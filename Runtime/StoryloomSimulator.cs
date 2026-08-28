@@ -135,7 +135,7 @@ namespace Storyloom
         static bool Involves(StoryNode n) => !string.IsNullOrEmpty(n.speakerId) || (n.characterIds != null && n.characterIds.Length > 0) || (n.lines != null && n.lines.Any(l => !string.IsNullOrEmpty(l.speakerId)));
         static bool Startable(StoryNode n, StoryNode start) =>
             n == start || n.entry || n.IsDiscoverable || n.type == "scene" || n.type == "event" || n.type == "unlock" || Involves(n);
-        bool Ok(StoryNode n) => n != null && (n.IsCheck || _runner.Evaluate(n.conditions, n.conditionMode, out _));
+        bool Ok(StoryNode n) => n != null && _runner.TagsOk(n.behaviorTagIds) && (n.IsCheck || _runner.Evaluate(n.conditions, n.conditionMode, out _));   // behavior tags gate beats, mirroring the director
         bool Available(StoryNode n, HashSet<string> played, StoryNode start)
         {
             if (!_o.strictOrder) return true;

@@ -23,6 +23,7 @@ namespace Storyloom
         public string[] entryNodeIds;   // export v2.1: every start — the main start plus nodes flagged as entry points (side quests, chapters, hubs)
 
         public StoryVariable[] variables;
+        public BehaviorTag[] behaviorTags;   // export v2.2: named switches decisions can flip; tagged nodes/options need ALL their tags active
         public Character[] characters;
         public Faction[] factions;
         public Species[] species;      // export version 2+
@@ -80,6 +81,7 @@ namespace Storyloom
         public Species GetSpecies(string id) { if (_speciesById == null) BuildIndexes(); return id != null && _speciesById.TryGetValue(id, out var s) ? s : null; }
         public Region GetRegion(string id) { if (_regionsById == null) BuildIndexes(); return id != null && _regionsById.TryGetValue(id, out var r) ? r : null; }
         public Lore GetLore(string id) { if (_loreById == null) BuildIndexes(); return id != null && _loreById.TryGetValue(id, out var l) ? l : null; }
+        public BehaviorTag GetBehaviorTag(string id) { if (behaviorTags == null) return null; foreach (var t in behaviorTags) if (t != null && t.id == id) return t; return null; }
         public StoryNode StartNode => GetNode(startNodeId);
 
         /// <summary>Optional side content placed at a main-thread node (Discoverable nodes with hostNodeId == nodeId).</summary>
@@ -137,6 +139,33 @@ namespace Storyloom
     public class Location  { public string id, name, description, image, region; }
     public class Item      { public string id, name, description, image, effect; public bool startOwned; }
     */
+
+    /// <summary>A behavior tag (export v2.2): a named switch decisions can flip with tag effects. A node or choice option
+    /// carrying behaviorTagIds is only available while every one of its tags is active; startsOn is the state at story start.</summary>
+    [Serializable]
+    public class BehaviorTag
+    {
+        public string id;
+        public string name;
+        public bool startsOn = true;
+    }
+
+    // An idle / revisit line a character can say when they have no main beat to play (or none yet). Picked by:
+    // 1) lines whose conditions pass (conditions always outrank unconditional lines), by priority;
+    // 2) lines pinned to this exact visit number (1st revisit, 2nd revisit…), by priority;
+    // 3) any-visit lines by priority, cycling through ties so repeat visits vary.
+    [Serializable]
+    public class Bark
+    {
+        public string id;
+        public string text;
+        public string emotion;
+        public int visit;              // 0 = any visit; N = only on the Nth revisit
+        public int priority;           // higher wins within its group
+        public bool once;              // never repeated after it has been said
+        public string conditionMode;   // all | any
+        public Condition[] conditions;
+    }
 
     [Serializable]
     public class Relationship
@@ -246,6 +275,7 @@ namespace Storyloom
         public int weight = 1;         // Random nodes: relative probability (0 = never)
         public string conditionMode;   // "all" | "any"
         public Condition[] conditions;
+        public string[] behaviorTagIds;   // export v2.2: option shown only while all these tags are active
     }
 
     /// <summary>An outgoing link. port is "out" for most nodes, "pass"/"fail" for Check nodes, or an option id for Choice nodes.</summary>
@@ -300,6 +330,7 @@ namespace Storyloom
         public Effect[] effects;
         public ChoiceOption[] options;   // Choice nodes only; empty otherwise
         public Link[] links;
+        public string[] behaviorTagIds;  // export v2.2: node available only while all these tags are active
 
         public bool IsChoice => type == "choice";
         public bool IsCheck => type == "check";

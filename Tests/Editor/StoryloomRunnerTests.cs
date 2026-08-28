@@ -149,6 +149,37 @@ namespace Storyloom.Tests
         }
 
         [Test]
+        public void BehaviorTags_GateOptionsAndFlipWithEffects()
+        {
+            var a = N("a"); a.links = new[] { L("gated"), L("other") };
+            var gated = N("gated", "ending"); gated.behaviorTagIds = new[] { "t1" };
+            var other = N("other"); other.effects = new[] { E("tag:t1", "enable", "") }; other.links = new[] { L("gated") };
+            var story = Story("a", new[] { a, gated, other });
+            story.behaviorTags = new[] { new BehaviorTag { id = "t1", name = "Friendly", startsOn = false } };
+            var r = new StoryRunner(story);
+            r.Start();
+            var opts = r.GetOptions();
+            Assert.IsTrue(opts.First(o => o.target.id == "gated").locked, "tag starts off → tagged node locked");
+            StringAssert.Contains("Friendly", opts.First(o => o.target.id == "gated").lockReason);
+            r.Choose(opts.First(o => o.target.id == "other"));   // enable effect fires on enter
+            Assert.IsFalse(r.GetOptions().Single().locked, "tag enabled → tagged node open");
+        }
+
+        [Test]
+        public void LocationVisits_AndLore_DriveConditions()
+        {
+            var story = Story("a", new[] { N("a") });
+            story.locations = new[] { new Location { id = "L1", name = "Harbour" } };
+            var r = new StoryRunner(story);
+            Assert.IsFalse(r.EvaluateOne(C("loc:L1", "visited", "")));
+            Assert.IsTrue(r.EvaluateOne(C("loc:L1", "not visited", "")));
+            r.VisitLocation("L1");
+            Assert.IsTrue(r.EvaluateOne(C("loc:L1", "visited", "")));
+            Assert.IsTrue(r.EvaluateOne(C("loc:L1", "currently in", "")));
+            Assert.IsFalse(r.EvaluateOne(C("lore:secret", "knows", "")));
+        }
+
+        [Test]
         public void FromJson_ParsesMinimalStory()
         {
             var story = StoryloomStory.FromJson("{\"name\":\"T\",\"startNodeId\":\"a\",\"nodes\":[{\"id\":\"a\",\"title\":\"A\",\"type\":\"scene\"}]}");

@@ -96,6 +96,13 @@ namespace Storyloom
         }
         // AddComponent returns null instead of throwing when it is refused; say which object so it can be fixed by hand.
         static void Blocked(GameObject go, string kind) => Debug.LogWarning($"Storyloom: couldn't give '{go.name}' a {kind} collider — something on it (a RequireComponent, or a collider of the other dimension that can't be removed) is in the way. Give it the right collider by hand, or bind a prefab made for this style.");
+        /// <summary>True when `go` carries colliders of the wrong dimension for this world plane, or none at all.</summary>
+        public static bool NeedsPlaneFix(GameObject go, bool xz)
+        {
+            if (!go || go.GetComponent<CharacterController>()) return false;
+            return xz ? (go.GetComponent<Collider2D>() || !go.GetComponent<Collider>())
+                      : (go.GetComponent<Collider>() || !go.GetComponent<Collider2D>());
+        }
     }
 
     /// <summary>Keeps a label (TextMesh) facing the camera. Used by the 3D placeholder prefabs.</summary>
