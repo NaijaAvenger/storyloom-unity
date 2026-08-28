@@ -509,7 +509,7 @@ namespace Storyloom.EditorTools
                 var loc = locs[li]; var cx = x0 + li * 12f; var root = new GameObject("Location · " + loc.name); root.transform.position = new Vector3(cx, 2, 0);
                 var trig = root.AddComponent<BoxCollider2D>(); trig.isTrigger = true; trig.size = new Vector2(11, 12); root.AddComponent<LocationTrigger>().locationId = loc.id;
                 var floor = Primitive("Floor", PrimitiveType.Quad, new Color(.2f + .1f * (li % 3), .35f, .3f), new Vector3(11, 12, 1)); floor.transform.SetParent(root.transform); floor.transform.localPosition = new Vector3(0, 0, .5f);
-                var sign = Instantiate(_b.defaultDiscoverablePrefab, root.transform); sign.name = "Signpost · " + loc.name; sign.transform.localPosition = new Vector3(0, -5, 0); DestroyImmediate(sign.GetComponent<DiscoverableInteractable>()); var sp = sign.AddComponent<Signpost>(); sp.locationId = loc.id; sp.prompt = sign.transform.Find("Prompt")?.gameObject; var smr = sign.GetComponent<MeshRenderer>(); if (smr) smr.sharedMaterial = Mat(new Color(.75f, .6f, .45f), "signpost"); sign.GetComponentInChildren<TextMesh>().text = loc.name;
+                var sign = Instantiate(_b.defaultDiscoverablePrefab, root.transform); sign.name = "Signpost · " + loc.name; sign.transform.localPosition = new Vector3(0, -5, 0); DestroyImmediate(sign.GetComponent<DiscoverableInteractable>()); var sp = sign.AddComponent<Signpost>(); sp.locationId = loc.id; sp.prompt = sign.transform.Find("Prompt")?.gameObject; var smr = sign.GetComponent<MeshRenderer>(); if (smr) smr.sharedMaterial = Mat(new Color(.75f, .6f, .45f), "signpost"); var stm = sign.GetComponentInChildren<TextMesh>(); if (stm) stm.text = loc.name;
                 int k = 0;
                 foreach (var ch in s.characters ?? new Character[0])
                 {
@@ -539,9 +539,9 @@ namespace Storyloom.EditorTools
             { var startLoc = s.StartNode != null ? EffectiveLocation(s, s.StartNode) : ""; int si = locs.FindIndex(l => l.id == startLoc); if (si >= 0) player.transform.position = new Vector3(x0 + si * 12f, -1.5f, 0); }
             // anything unplaced goes in a "Backstage" cluster so nothing is lost
             var back = new GameObject("Backstage (unplaced)"); back.transform.position = new Vector3(0, -9, 0); int bk = 0;
-            foreach (var ch in s.characters ?? new Character[0]) { if (placed.Contains("c:" + ch.id) || ch.IsProtagonist) continue; var go = Instantiate(_b.defaultNpcPrefab, back.transform); go.name = "NPC · " + ch.name; go.transform.localPosition = new Vector3(-6 + bk++ * 2, 0, 0); go.GetComponent<NpcInteractable>().characterId = ch.id; go.GetComponentInChildren<TextMesh>().text = ch.name; }
-            foreach (var it in s.items ?? new Item[0]) { if (placed.Contains("i:" + it.id) || it.startOwned) continue; var go = Instantiate(_b.defaultItemPrefab, back.transform); go.name = "Item · " + it.name; go.transform.localPosition = new Vector3(-6 + bk++ * 2, 0, 0); go.GetComponent<ItemPickup>().itemId = it.id; go.GetComponentInChildren<TextMesh>().text = it.name; }
-            foreach (var dn in s.nodes.Where(n => n.IsDiscoverable)) { if (placed.Contains("d:" + dn.id)) continue; var go = Instantiate(_b.defaultDiscoverablePrefab, back.transform); go.name = "Discoverable · " + dn.title; go.transform.localPosition = new Vector3(-6 + bk++ * 2, 0, 0); var di = go.GetComponent<DiscoverableInteractable>(); di.nodeId = dn.id; var tm = go.GetComponentInChildren<TextMesh>(); if (tm) { tm.richText = true; tm.text = RewardLabel(s, dn); di.label = tm; } }
+            foreach (var ch in s.characters ?? new Character[0]) { if (placed.Contains("c:" + ch.id) || ch.IsProtagonist) continue; var go = Instantiate(_b.defaultNpcPrefab, back.transform); go.name = "NPC · " + ch.name; go.transform.localPosition = new Vector3(-6 + bk++ * 2, 0, 0); var npc = go.GetComponent<NpcInteractable>() ?? go.AddComponent<NpcInteractable>(); npc.characterId = ch.id; var tm = go.GetComponentInChildren<TextMesh>(); if (tm) tm.text = ch.name; }
+            foreach (var it in s.items ?? new Item[0]) { if (placed.Contains("i:" + it.id) || it.startOwned) continue; var go = Instantiate(_b.defaultItemPrefab, back.transform); go.name = "Item · " + it.name; go.transform.localPosition = new Vector3(-6 + bk++ * 2, 0, 0); var pk = go.GetComponent<ItemPickup>() ?? go.AddComponent<ItemPickup>(); pk.itemId = it.id; var tm = go.GetComponentInChildren<TextMesh>(); if (tm) tm.text = it.name; }
+            foreach (var dn in s.nodes.Where(n => n.IsDiscoverable)) { if (placed.Contains("d:" + dn.id)) continue; var go = Instantiate(_b.defaultDiscoverablePrefab, back.transform); go.name = "Discoverable · " + dn.title; go.transform.localPosition = new Vector3(-6 + bk++ * 2, 0, 0); var di = go.GetComponent<DiscoverableInteractable>() ?? go.AddComponent<DiscoverableInteractable>(); di.nodeId = dn.id; var tm = go.GetComponentInChildren<TextMesh>(); if (tm) { tm.richText = true; tm.text = RewardLabel(s, dn); di.label = tm; } }
             if (bk == 0) DestroyImmediate(back);
 
             // UI
@@ -609,7 +609,16 @@ namespace Storyloom.EditorTools
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             var dirGo = new GameObject("Storyloom Director"); var d = dirGo.AddComponent<StoryloomDirector>(); d.bindings = _b; d.keys = KeysAsset(); d.persistAcrossScenes = false; d.playStartNodeOnLoad = true;
             var light = new GameObject("Directional Light", typeof(Light)); var lt = light.GetComponent<Light>(); lt.type = LightType.Directional; lt.intensity = 1.1f; light.transform.rotation = Quaternion.Euler(50, -30, 0);
-            if (style == GameStyle.TopDown) BuildTopDownWorld(s, d); else Build3DWorld(s, d, style);
+            // a default prefab someone replaced (or an older placeholder that lost a script) gets its component re-added per
+            // spawn below; name the deficient prefab so the root cause is visible instead of a mystery
+            void WarnDeficient(GameObject prefab, System.Type t, string label) { if (prefab && !prefab.GetComponent(t)) Debug.LogWarning($"Storyloom: the default {label} prefab '{prefab.name}' has no {t.Name} — one is added to every spawned copy. Re-run 'Create placeholder prefabs' (or fix/clear the default) to repair the prefab itself.", prefab); }
+            WarnDeficient(_b.defaultNpcPrefab, typeof(NpcInteractable), "NPC");
+            WarnDeficient(_b.defaultItemPrefab, typeof(ItemPickup), "item");
+            WarnDeficient(_b.defaultDiscoverablePrefab, typeof(DiscoverableInteractable), "discoverable");
+            // an error mid-world must not abort generation: a half scene with no UI, no EventSystem and no save is exactly
+            // the "first play is subtly broken" failure mode
+            try { if (style == GameStyle.TopDown) BuildTopDownWorld(s, d); else Build3DWorld(s, d, style); }
+            catch (System.Exception e) { Debug.LogError("Storyloom: scene generation hit an error mid-world — continuing so the scene still gets its UI, director wiring and save. Please report this:\n" + e); }
             MatchPropColliders(style != GameStyle.TopDown);   // bound prefabs made for the other style carry the wrong collider kind
             StampEntityAssets();                              // reference the typed entity handles, not just bare ids (no-op if none generated)
             BuildUI(d, style);
@@ -641,7 +650,7 @@ namespace Storyloom.EditorTools
                 var loc = locs[li]; var cx = x0 + li * Lane; var root = new GameObject("Location · " + loc.name); root.transform.position = new Vector3(cx, 2, 0);
                 var trig = root.AddComponent<BoxCollider2D>(); trig.isTrigger = true; trig.size = new Vector2(11, 12); root.AddComponent<LocationTrigger>().locationId = loc.id;
                 var floor = Primitive("Floor", PrimitiveType.Quad, new Color(.2f + .1f * (li % 3), .35f, .3f), new Vector3(11, 12, 1)); floor.transform.SetParent(root.transform); floor.transform.localPosition = new Vector3(0, 0, .5f);
-                var sign = Instantiate(_b.defaultDiscoverablePrefab, root.transform); sign.name = "Signpost · " + loc.name; sign.transform.localPosition = new Vector3(0, -5, 0); DestroyImmediate(sign.GetComponent<DiscoverableInteractable>()); var sp = sign.AddComponent<Signpost>(); sp.locationId = loc.id; sp.prompt = sign.transform.Find("Prompt")?.gameObject; var smr = sign.GetComponent<MeshRenderer>(); if (smr) smr.sharedMaterial = Mat(new Color(.75f, .6f, .45f), "signpost"); sign.GetComponentInChildren<TextMesh>().text = loc.name;
+                var sign = Instantiate(_b.defaultDiscoverablePrefab, root.transform); sign.name = "Signpost · " + loc.name; sign.transform.localPosition = new Vector3(0, -5, 0); DestroyImmediate(sign.GetComponent<DiscoverableInteractable>()); var sp = sign.AddComponent<Signpost>(); sp.locationId = loc.id; sp.prompt = sign.transform.Find("Prompt")?.gameObject; var smr = sign.GetComponent<MeshRenderer>(); if (smr) smr.sharedMaterial = Mat(new Color(.75f, .6f, .45f), "signpost"); var stm = sign.GetComponentInChildren<TextMesh>(); if (stm) stm.text = loc.name;
                 int k = 0;
                 foreach (var ch in s.characters ?? new Character[0])
                 {
@@ -671,9 +680,9 @@ namespace Storyloom.EditorTools
             { var startLoc = s.StartNode != null ? EffectiveLocation(s, s.StartNode) : ""; int si = locs.FindIndex(l => l.id == startLoc); if (si >= 0) player.transform.position = new Vector3(x0 + si * Lane, -1.5f, 0); }
             // anything unplaced goes in a "Backstage" cluster so nothing is lost
             var back = new GameObject("Backstage (unplaced)"); back.transform.position = new Vector3(0, -9, 0); int bk = 0;
-            foreach (var ch in s.characters ?? new Character[0]) { if (placed.Contains("c:" + ch.id) || ch.IsProtagonist) continue; var go = Instantiate(_b.defaultNpcPrefab, back.transform); go.name = "NPC · " + ch.name; go.transform.localPosition = new Vector3(-6 + bk++ * 2, 0, 0); go.GetComponent<NpcInteractable>().characterId = ch.id; go.GetComponentInChildren<TextMesh>().text = ch.name; }
-            foreach (var it in s.items ?? new Item[0]) { if (placed.Contains("i:" + it.id) || it.startOwned) continue; var go = Instantiate(_b.defaultItemPrefab, back.transform); go.name = "Item · " + it.name; go.transform.localPosition = new Vector3(-6 + bk++ * 2, 0, 0); go.GetComponent<ItemPickup>().itemId = it.id; go.GetComponentInChildren<TextMesh>().text = it.name; }
-            foreach (var dn in s.nodes.Where(n => n.IsDiscoverable)) { if (placed.Contains("d:" + dn.id)) continue; var go = Instantiate(_b.defaultDiscoverablePrefab, back.transform); go.name = "Discoverable · " + dn.title; go.transform.localPosition = new Vector3(-6 + bk++ * 2, 0, 0); var di = go.GetComponent<DiscoverableInteractable>(); di.nodeId = dn.id; var tm = go.GetComponentInChildren<TextMesh>(); if (tm) { tm.richText = true; tm.text = RewardLabel(s, dn); di.label = tm; } }
+            foreach (var ch in s.characters ?? new Character[0]) { if (placed.Contains("c:" + ch.id) || ch.IsProtagonist) continue; var go = Instantiate(_b.defaultNpcPrefab, back.transform); go.name = "NPC · " + ch.name; go.transform.localPosition = new Vector3(-6 + bk++ * 2, 0, 0); var npc = go.GetComponent<NpcInteractable>() ?? go.AddComponent<NpcInteractable>(); npc.characterId = ch.id; var tm = go.GetComponentInChildren<TextMesh>(); if (tm) tm.text = ch.name; }
+            foreach (var it in s.items ?? new Item[0]) { if (placed.Contains("i:" + it.id) || it.startOwned) continue; var go = Instantiate(_b.defaultItemPrefab, back.transform); go.name = "Item · " + it.name; go.transform.localPosition = new Vector3(-6 + bk++ * 2, 0, 0); var pk = go.GetComponent<ItemPickup>() ?? go.AddComponent<ItemPickup>(); pk.itemId = it.id; var tm = go.GetComponentInChildren<TextMesh>(); if (tm) tm.text = it.name; }
+            foreach (var dn in s.nodes.Where(n => n.IsDiscoverable)) { if (placed.Contains("d:" + dn.id)) continue; var go = Instantiate(_b.defaultDiscoverablePrefab, back.transform); go.name = "Discoverable · " + dn.title; go.transform.localPosition = new Vector3(-6 + bk++ * 2, 0, 0); var di = go.GetComponent<DiscoverableInteractable>() ?? go.AddComponent<DiscoverableInteractable>(); di.nodeId = dn.id; var tm = go.GetComponentInChildren<TextMesh>(); if (tm) { tm.richText = true; tm.text = RewardLabel(s, dn); di.label = tm; } }
             if (bk == 0) DestroyImmediate(back);
         }
 
@@ -715,7 +724,7 @@ namespace Storyloom.EditorTools
                 var zrb = zone.AddComponent<Rigidbody>(); zrb.isKinematic = true; zrb.useGravity = false;
                 zone.AddComponent<LocationTrigger>().locationId = loc.id;
                 var floor = Primitive3D("Floor", PrimitiveType.Plane, new Color(.2f + .1f * (li % 3), .35f, .3f), new Vector3(1.1f, 1, 1.2f)); DestroyImmediate(floor.GetComponent<Collider>()); floor.transform.SetParent(root.transform); floor.transform.localPosition = new Vector3(0, 0.005f, 0);
-                var sign = Instantiate(_b.defaultDiscoverablePrefab, root.transform); sign.name = "Signpost · " + loc.name; sign.transform.localPosition = new Vector3(0, Y, -5); DestroyImmediate(sign.GetComponent<DiscoverableInteractable>()); var sp = sign.AddComponent<Signpost>(); sp.locationId = loc.id; sp.prompt = sign.transform.Find("Prompt")?.gameObject; var smr = sign.GetComponent<MeshRenderer>(); if (smr) smr.sharedMaterial = Mat(new Color(.75f, .6f, .45f), "signpost"); sign.GetComponentInChildren<TextMesh>().text = loc.name;
+                var sign = Instantiate(_b.defaultDiscoverablePrefab, root.transform); sign.name = "Signpost · " + loc.name; sign.transform.localPosition = new Vector3(0, Y, -5); DestroyImmediate(sign.GetComponent<DiscoverableInteractable>()); var sp = sign.AddComponent<Signpost>(); sp.locationId = loc.id; sp.prompt = sign.transform.Find("Prompt")?.gameObject; var smr = sign.GetComponent<MeshRenderer>(); if (smr) smr.sharedMaterial = Mat(new Color(.75f, .6f, .45f), "signpost"); var stm = sign.GetComponentInChildren<TextMesh>(); if (stm) stm.text = loc.name;
                 int k = 0;
                 Vector3 Slot() { var v = new Vector3(-4 + (k % 5) * 2, Y, 3 - (k / 5) * 2); k++; return v; }
                 foreach (var ch in s.characters ?? new Character[0])
@@ -744,9 +753,9 @@ namespace Storyloom.EditorTools
             }
             { var startLoc = s.StartNode != null ? EffectiveLocation(s, s.StartNode) : ""; int si = locs.FindIndex(l => l.id == startLoc); if (si >= 0) player.transform.position = new Vector3(x0 + si * Lane, 1.0f, -1.5f); }
             var back = new GameObject("Backstage (unplaced)"); back.transform.position = new Vector3(0, 0, -9); int bk = 0;
-            foreach (var ch in s.characters ?? new Character[0]) { if (placed.Contains("c:" + ch.id) || ch.IsProtagonist) continue; var go = Instantiate(_b.defaultNpcPrefab, back.transform); go.name = "NPC · " + ch.name; go.transform.localPosition = new Vector3(-6 + bk++ * 2, Y, 0); go.GetComponent<NpcInteractable>().characterId = ch.id; go.GetComponentInChildren<TextMesh>().text = ch.name; }
-            foreach (var it in s.items ?? new Item[0]) { if (placed.Contains("i:" + it.id) || it.startOwned) continue; var go = Instantiate(_b.defaultItemPrefab, back.transform); go.name = "Item · " + it.name; go.transform.localPosition = new Vector3(-6 + bk++ * 2, Y, 0); go.GetComponent<ItemPickup>().itemId = it.id; go.GetComponentInChildren<TextMesh>().text = it.name; }
-            foreach (var dn in s.nodes.Where(n => n.IsDiscoverable)) { if (placed.Contains("d:" + dn.id)) continue; var go = Instantiate(_b.defaultDiscoverablePrefab, back.transform); go.name = "Discoverable · " + dn.title; go.transform.localPosition = new Vector3(-6 + bk++ * 2, Y, 0); var di = go.GetComponent<DiscoverableInteractable>(); di.nodeId = dn.id; var tm = go.GetComponentInChildren<TextMesh>(); if (tm) { tm.richText = true; tm.text = RewardLabel(s, dn); di.label = tm; } }
+            foreach (var ch in s.characters ?? new Character[0]) { if (placed.Contains("c:" + ch.id) || ch.IsProtagonist) continue; var go = Instantiate(_b.defaultNpcPrefab, back.transform); go.name = "NPC · " + ch.name; go.transform.localPosition = new Vector3(-6 + bk++ * 2, Y, 0); var npc = go.GetComponent<NpcInteractable>() ?? go.AddComponent<NpcInteractable>(); npc.characterId = ch.id; var tm = go.GetComponentInChildren<TextMesh>(); if (tm) tm.text = ch.name; }
+            foreach (var it in s.items ?? new Item[0]) { if (placed.Contains("i:" + it.id) || it.startOwned) continue; var go = Instantiate(_b.defaultItemPrefab, back.transform); go.name = "Item · " + it.name; go.transform.localPosition = new Vector3(-6 + bk++ * 2, Y, 0); var pk = go.GetComponent<ItemPickup>() ?? go.AddComponent<ItemPickup>(); pk.itemId = it.id; var tm = go.GetComponentInChildren<TextMesh>(); if (tm) tm.text = it.name; }
+            foreach (var dn in s.nodes.Where(n => n.IsDiscoverable)) { if (placed.Contains("d:" + dn.id)) continue; var go = Instantiate(_b.defaultDiscoverablePrefab, back.transform); go.name = "Discoverable · " + dn.title; go.transform.localPosition = new Vector3(-6 + bk++ * 2, Y, 0); var di = go.GetComponent<DiscoverableInteractable>() ?? go.AddComponent<DiscoverableInteractable>(); di.nodeId = dn.id; var tm = go.GetComponentInChildren<TextMesh>(); if (tm) { tm.richText = true; tm.text = RewardLabel(s, dn); di.label = tm; } }
             if (bk == 0) DestroyImmediate(back);
         }
 
@@ -961,6 +970,23 @@ namespace Storyloom.EditorTools
             if (k != null) { EditorUtility.SetDirty(k); AssetDatabase.SaveAssets(); }   // triggers the KeyCode→Key migration on assets from v0.2
             if (k == null) { k = CreateInstance<StoryloomKeyBinds>(); Directory.CreateDirectory(Root + "/Data"); AssetDatabase.CreateAsset(k, p); AssetDatabase.SaveAssets(); }
             return k;
+        }
+    }
+
+    /// <summary>Focuses the Game view when play mode starts in a scene with a Storyloom director. The editor only locks the
+    /// cursor and delivers mouse deltas once the Game view has focus — and the first play right after clicking buttons in
+    /// the Storyloom window leaves focus on that window, which read as "camera doesn't turn, cursor stays visible" until a
+    /// click into the Game view (the second play then worked because focus stuck).</summary>
+    [InitializeOnLoad]
+    static class StoryloomPlayFocus
+    {
+        static StoryloomPlayFocus() { EditorApplication.playModeStateChanged += OnPlayMode; }
+        static void OnPlayMode(PlayModeStateChange state)
+        {
+            if (state != PlayModeStateChange.EnteredPlayMode) return;
+            if (!Object.FindObjectOfType<StoryloomDirector>()) return;
+            var gameView = typeof(UnityEditor.Editor).Assembly.GetType("UnityEditor.GameView");
+            if (gameView != null) EditorWindow.FocusWindowIfItsOpen(gameView);
         }
     }
 }
