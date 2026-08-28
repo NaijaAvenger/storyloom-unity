@@ -177,6 +177,17 @@ namespace Storyloom
             // var player = FindObjectOfType<PlayerController2D>();
             if (player && !xz && !player.GetComponent<Collider2D>()) { var pc = player.gameObject.AddComponent<CircleCollider2D>(); if (pc) { pc.radius = .4f; fixedNames.Add(player.name); } }
             if (player && !xz) { var prb = player.GetComponent<Rigidbody2D>(); if (prb) { prb.sleepMode = RigidbodySleepMode2D.NeverSleep; prb.interpolation = RigidbodyInterpolation2D.Interpolate; prb.collisionDetectionMode = CollisionDetectionMode2D.Continuous; } }
+            // camera driver: a Main Camera without its style's driver plays as a static view while the player walks away
+            var mainCam = Camera.main;
+            if (player && mainCam)
+            {
+                if (player.Style == GameStyle.ThirdPerson && !mainCam.GetComponent<ThirdPersonCamera>() && !mainCam.transform.IsChildOf(player.transform))
+                { var orb = mainCam.gameObject.AddComponent<ThirdPersonCamera>(); orb.target = player.transform; orb.keys = player.keys; fixedNames.Add("camera (added orbit driver)"); }
+                if (player.Style == GameStyle.TopDown && !mainCam.GetComponent<SimpleFollow>() && !mainCam.transform.IsChildOf(player.transform))
+                { var fol = mainCam.gameObject.AddComponent<SimpleFollow>(); fol.target = player.transform; fixedNames.Add("camera (added follow)"); }
+                if (player.Style == GameStyle.FirstPerson && !mainCam.transform.IsChildOf(player.transform))
+                { var fp = player as FirstPersonController; var head = fp && fp.head ? fp.head : player.transform; mainCam.transform.SetParent(head, false); mainCam.transform.localPosition = Vector3.zero; mainCam.transform.localRotation = Quaternion.identity; fixedNames.Add("camera (mounted on head)"); }
+            }
             // zones: must be triggers; in 3D they need a kinematic rigidbody for enter/exit against the CharacterController and sit on Ignore Raycast
             foreach (var z in FindObjectsOfType<LocationTrigger>(true))
             {

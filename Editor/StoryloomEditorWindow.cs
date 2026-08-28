@@ -626,7 +626,8 @@ namespace Storyloom.EditorTools
             Directory.CreateDirectory(Root + "/Scenes");
             var suffix = style == GameStyle.TopDown ? "Top-down kit" : style == GameStyle.ThirdPerson ? "Third person kit" : "First person kit";
             var scenePath = $"{Root}/Scenes/{s.name} ({suffix}).unity"; EditorSceneManager.SaveScene(scene, scenePath);
-            ShowNotification(new GUIContent("Scene created — press Play")); Selection.activeObject = dirGo;
+            RepairScene();   // fresh scenes go through the same pass Repair runs by hand: anything generation missed is fixed and saved immediately
+            ShowNotification(new GUIContent("Scene created & verified — press Play")); Selection.activeObject = dirGo;
         }
 
         // ---- top-down (Stardew-style): XY plane, orthographic camera looking down -z, 2D physics
@@ -909,6 +910,17 @@ namespace Storyloom.EditorTools
             // var player = Object.FindObjectOfType<PlayerController2D>();
             if (player && !xz) { if (!player.GetComponent<Collider2D>()) { var pc = player.gameObject.AddComponent<CircleCollider2D>(); if (pc) { pc.radius = .4f; fixedCount++; } } var rb = player.GetComponent<Rigidbody2D>(); if (rb) { rb.gravityScale = 0; rb.freezeRotation = true; if (rb.sleepMode != RigidbodySleepMode2D.NeverSleep) { rb.sleepMode = RigidbodySleepMode2D.NeverSleep; fixedCount++; } rb.interpolation = RigidbodyInterpolation2D.Interpolate; rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous; } }
             if (player && xz && !player.GetComponent<CursorLock>()) { player.gameObject.AddComponent<CursorLock>().keys = player.keys; fixedCount++; }
+            // camera driver: a Main Camera without its style's driver plays as a static view while the player walks away
+            var mainCam = Camera.main;
+            if (player && mainCam)
+            {
+                if (player.Style == GameStyle.ThirdPerson && !mainCam.GetComponent<ThirdPersonCamera>() && !mainCam.transform.IsChildOf(player.transform))
+                { var orb = mainCam.gameObject.AddComponent<ThirdPersonCamera>(); orb.target = player.transform; orb.keys = player.keys; fixedCount++; Debug.Log("Storyloom repair: Main Camera had no ThirdPersonCamera — added one targeting the player", mainCam); }
+                if (player.Style == GameStyle.TopDown && !mainCam.GetComponent<SimpleFollow>() && !mainCam.transform.IsChildOf(player.transform))
+                { var fol = mainCam.gameObject.AddComponent<SimpleFollow>(); fol.target = player.transform; fixedCount++; Debug.Log("Storyloom repair: Main Camera had no SimpleFollow — added one targeting the player", mainCam); }
+                if (player.Style == GameStyle.FirstPerson && !mainCam.transform.IsChildOf(player.transform))
+                { var fp = player as FirstPersonController; var head = fp && fp.head ? fp.head : player.transform; mainCam.transform.SetParent(head, false); mainCam.transform.localPosition = Vector3.zero; mainCam.transform.localRotation = Quaternion.identity; fixedCount++; Debug.Log("Storyloom repair: first-person Main Camera wasn't parented under the player — mounted it on the head", mainCam); }
+            }
             foreach (var z in Object.FindObjectsOfType<LocationTrigger>()) { var c3 = z.GetComponent<Collider>(); if (c3) { if (!c3.isTrigger) { c3.isTrigger = true; fixedCount++; } if (!z.GetComponent<Rigidbody>()) { var rb = z.gameObject.AddComponent<Rigidbody>(); rb.isKinematic = true; rb.useGravity = false; fixedCount++; } if (z.gameObject.layer != 2) { z.gameObject.layer = 2; fixedCount++; } } var c2 = z.GetComponent<Collider2D>(); if (c2 && !c2.isTrigger) { c2.isTrigger = true; fixedCount++; } }
             // objects renamed by hand: match their label (TextMesh) text against character / item / location names and attach the right component
             if (_b != null && _b.story != null && _b.story.Story != null)
