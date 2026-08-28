@@ -97,7 +97,16 @@ namespace Storyloom
             if (Banner == null) { bannerOverride = FindImplementation<ILocationBannerUI>(); if (bannerOverride) missing.Add("banner (custom)"); }
             if (Toast == null) { toastOverride = FindImplementation<IPickupToastUI>(); if (toastOverride) missing.Add("toast (custom)"); }
             if (Inventory == null) { inventoryOverride = FindImplementation<IInventoryUI>(); if (inventoryOverride) missing.Add("inventory (custom)"); }
-            if (missing.Count > 0) Debug.LogWarning("Storyloom: director was missing UI references, found them in the scene: " + string.Join(", ", missing));
+            if (missing.Count > 0)
+            {
+                // Out of play mode the re-link is saved with the scene; during play it is thrown away when play stops, so
+                // without a one-time repair-and-save the same warning repeats every single play — say so.
+#if UNITY_EDITOR
+                if (!Application.isPlaying) UnityEditor.EditorUtility.SetDirty(this);
+#endif
+                Debug.LogWarning("Storyloom: director was missing UI references, found them in the scene: " + string.Join(", ", missing)
+                    + (Application.isPlaying ? ". Play-mode fixes don't persist — run 'Repair open scene' (Window ▸ Storyloom) once outside play mode and SAVE the scene, or this repeats every play." : ""));
+            }
             if (Toast == null) Debug.LogWarning("Storyloom: no pickup toast in the scene — 'Got X' popups can't show. Regenerate the scene from Window ▸ Storyloom, or add a component implementing IPickupToastUI.");
             if (Inventory == null) Debug.LogWarning("Storyloom: no inventory UI in the scene — the inventory key can't open anything. Regenerate the scene from Window ▸ Storyloom, or add a component implementing IInventoryUI.");
         }

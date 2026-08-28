@@ -26,32 +26,25 @@ namespace Storyloom.EditorTools
         void OnGUI()
         {
             GUILayout.Space(6);
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                if (GUILayout.Button("Import story JSON…", GUILayout.Height(26))) ImportJson();
-                using (new EditorGUI.DisabledScope(_b == null))
-                {
-                    if (GUILayout.Button("Re-sync from story", GUILayout.Height(26))) { Undo.RecordObject(_b, "Sync"); int n = _b.SyncFromStory(); EditorUtility.SetDirty(_b); ShowNotification(new GUIContent($"{n} new entr{(n == 1 ? "y" : "ies")}")); }
-                    if (GUILayout.Button("Create placeholder prefabs", GUILayout.Height(26))) CreatePlaceholders();
-                    if (GUILayout.Button("Generate entity assets", GUILayout.Height(26))) GenerateEntityAssets();
-                    // if (GUILayout.Button("Create Stardew-style scene", GUILayout.Height(26))) CreateScene();
-                    if (GUILayout.Button("Create test scene", GUILayout.Height(26))) CreateScene(_b.gameStyle);
-                    if (GUILayout.Button("Repair open scene", GUILayout.Height(26))) RepairScene();
-                    if (Application.isPlaying && GUILayout.Button("Self-test (play mode)", GUILayout.Height(26))) SelfTest();
-                }
-            }
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                if (GUILayout.Button("Simulator", GUILayout.Height(20))) StoryloomSimulatorWindow.Open();
-                if (GUILayout.Button("Playtest panel", GUILayout.Height(20))) StoryloomPlaytestWindow.Open();
-                if (GUILayout.Button("Welcome / guide", GUILayout.Height(20))) StoryloomWelcomeWindow.Open();
-            }
+            bool hasB = _b != null;
+            FlowButtons(26,
+                ("Import story JSON…", true, (System.Action)ImportJson),
+                ("Re-sync from story", hasB, () => { Undo.RecordObject(_b, "Sync"); int n = _b.SyncFromStory(); EditorUtility.SetDirty(_b); ShowNotification(new GUIContent($"{n} new entr{(n == 1 ? "y" : "ies")}")); }),
+                ("Create placeholder prefabs", hasB, () => CreatePlaceholders()),
+                ("Generate entity assets", hasB, (System.Action)GenerateEntityAssets),
+                ("Create test scene", hasB, () => CreateScene(_b.gameStyle)),
+                ("Repair open scene", hasB, (System.Action)RepairScene));
+            FlowButtons(20,
+                ("Self-test (play mode)", hasB && Application.isPlaying, (System.Action)SelfTest),
+                ("Simulator", true, (System.Action)StoryloomSimulatorWindow.Open),
+                ("Playtest panel", true, (System.Action)StoryloomPlaytestWindow.Open),
+                ("Welcome / guide", true, (System.Action)StoryloomWelcomeWindow.Open));
             if (_b != null)
             {
                 using (new EditorGUILayout.HorizontalScope())
                 {
                     EditorGUILayout.LabelField("Game style", GUILayout.Width(80));
-                    var ns = (GameStyle)GUILayout.Toolbar((int)_b.gameStyle, new[] { "Top-down (Stardew)", "Third person", "First person" }, GUILayout.Height(22));
+                    var ns = (GameStyle)GUILayout.Toolbar((int)_b.gameStyle, new[] { "Top-down", "Third person", "First person" }, GUILayout.Height(22));
                     if (ns != _b.gameStyle) { Undo.RecordObject(_b, "Game style"); _b.gameStyle = ns; EditorUtility.SetDirty(_b); }
                 }
                 EditorGUILayout.LabelField(_b.gameStyle == GameStyle.TopDown ? "Top-down: XY world, 2D physics, camera looks down. WASD move, E talk / pick up / examine." :
@@ -91,6 +84,27 @@ namespace Storyloom.EditorTools
             }
             if (EditorGUI.EndChangeCheck()) EditorUtility.SetDirty(_b);
             EditorGUILayout.EndScrollView();
+        }
+
+        // Toolbar buttons flow into as many rows as the window's width needs, instead of demanding a very wide window.
+        // Actions run via delayCall — after OnGUI finishes — so anything that opens a window, rebuilds assets, or pops a
+        // dialog can't unbalance the active layout ("EndLayoutGroup: BeginLayoutGroup must be called first").
+        void FlowButtons(float height, params (string label, bool enabled, System.Action act)[] items)
+        {
+            float w = EditorGUIUtility.currentViewWidth - 16f;
+            int perRow = Mathf.Clamp(Mathf.FloorToInt(w / 170f), 1, items.Length);
+            for (int i = 0; i < items.Length; i += perRow)
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    for (int j = i; j < Mathf.Min(i + perRow, items.Length); j++)
+                    {
+                        var it = items[j];
+                        using (new EditorGUI.DisabledScope(!it.enabled))
+                            if (GUILayout.Button(it.label, GUILayout.Height(height))) EditorApplication.delayCall += () => it.act();
+                    }
+                }
+            }
         }
 
         void Row(string title, string sub, System.Action body)
@@ -390,11 +404,11 @@ namespace Storyloom.EditorTools
             if (map.Count == 0)
             {
                 EditorGUILayout.HelpBox("No entity assets yet. Generate one ScriptableObject per character / item / location / discoverable — typed handles you drag onto GameObjects and prefabs to wire them to the story.", MessageType.Info);
-                if (GUILayout.Button("Generate entity assets", GUILayout.Height(26))) GenerateEntityAssets();
+                if (GUILayout.Button("Generate entity assets", GUILayout.Height(26))) EditorApplication.delayCall += GenerateEntityAssets;
                 return;
             }
             EditorGUILayout.LabelField("Drag a row onto a GameObject (Hierarchy / Scene view), onto a prefab in the Project window, or onto empty ground in the Scene view to place it. Alt-drop a location for a Signpost instead of a zone.", EditorStyles.wordWrappedMiniLabel);
-            if (GUILayout.Button("Re-generate / refresh", GUILayout.Width(160))) GenerateEntityAssets();
+            if (GUILayout.Button("Re-generate / refresh", GUILayout.Width(160))) EditorApplication.delayCall += GenerateEntityAssets;
             var groups = new (string title, System.Type type)[] {
                 ("Characters", typeof(StoryloomCharacterAsset)), ("Items", typeof(StoryloomItemAsset)),
                 ("Locations", typeof(StoryloomLocationAsset)), ("Discoverables", typeof(StoryloomDiscoverableAsset)) };
@@ -588,7 +602,7 @@ namespace Storyloom.EditorTools
             BuildUI(d, style);
             dirGo.AddComponent<StoryloomDebugHud>();
             Directory.CreateDirectory(Root + "/Scenes");
-            var suffix = style == GameStyle.TopDown ? "Stardew kit" : style == GameStyle.ThirdPerson ? "Third person kit" : "First person kit";
+            var suffix = style == GameStyle.TopDown ? "Top-down kit" : style == GameStyle.ThirdPerson ? "Third person kit" : "First person kit";
             var scenePath = $"{Root}/Scenes/{s.name} ({suffix}).unity"; EditorSceneManager.SaveScene(scene, scenePath);
             ShowNotification(new GUIContent("Scene created — press Play")); Selection.activeObject = dirGo;
         }
@@ -792,7 +806,10 @@ namespace Storyloom.EditorTools
         {
             var root = banner.group ? banner.group.gameObject : null; if (!root) return;
             Fit(root, new Vector2(.12f, 1), new Vector2(.88f, 1), new Vector2(0, -132), new Vector2(0, -16));
-            var bd = MakeText(root.transform, "Description", "", 16, TextAnchor.UpperCenter, new Color(.94f, .92f, .86f));  Fit(bd.gameObject, new Vector2(0, 0), new Vector2(1, 1), new Vector2(18, 8), new Vector2(-18, -60));
+            // reuse an existing Description child: repairing without saving used to re-add one on every repair
+            var existing = root.transform.Find("Description");
+            var bd = existing ? existing.GetComponent<Text>() : null;
+            if (!bd) { bd = MakeText(root.transform, "Description", "", 16, TextAnchor.UpperCenter, new Color(.94f, .92f, .86f));  Fit(bd.gameObject, new Vector2(0, 0), new Vector2(1, 1), new Vector2(18, 8), new Vector2(-18, -60)); }
             if (banner.nameText) { banner.nameText.alignment = TextAnchor.UpperCenter; Fit(banner.nameText.gameObject, new Vector2(0, 1), new Vector2(1, 1), new Vector2(12, -40), new Vector2(-12, -6)); }
             if (banner.subText) { banner.subText.alignment = TextAnchor.UpperCenter; Fit(banner.subText.gameObject, new Vector2(0, 1), new Vector2(1, 1), new Vector2(12, -58), new Vector2(-12, -42)); }
             banner.descText = bd; banner.hold = 3f; EditorUtility.SetDirty(banner);
@@ -893,7 +910,10 @@ namespace Storyloom.EditorTools
             fixedCount += StampEntityAssets();   // fill empty entity-asset references from ids (no-op when none are generated)
             if (swappedColliders.Count > 0) Debug.Log($"Storyloom repair: gave {swappedColliders.Count} object(s) the {(xz ? "3D" : "2D")} collider this style needs (they came from a prefab bound for the other style): " + string.Join(", ", swappedColliders));
             EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
-            ShowNotification(new GUIContent($"Repaired {fixedCount} thing{(fixedCount == 1 ? "" : "s")}"));
+            // save immediately (when the scene has a file): a repair that isn't saved reverts on the next play/reload, which
+            // read as "the UI always needs repairing again"
+            bool saved = !Application.isPlaying && !string.IsNullOrEmpty(SceneManager.GetActiveScene().path) && EditorSceneManager.SaveScene(SceneManager.GetActiveScene());
+            ShowNotification(new GUIContent($"Repaired {fixedCount} thing{(fixedCount == 1 ? "" : "s")}" + (saved ? " · scene saved" : Application.isPlaying ? " (play mode — not saved)" : "")));
         }
         // In play mode: exercise the toast, the inventory and focus directly, and print what happened — separates "input never arrives" from "UI missing".
         void SelfTest()

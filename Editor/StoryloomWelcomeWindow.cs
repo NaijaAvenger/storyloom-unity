@@ -51,7 +51,7 @@ namespace Storyloom.EditorTools
             H("Quick start — playable in five steps");
             Li("1. Window ▸ Storyloom ▸ 'Import story JSON…' → pick your .unity.json export.");
             Li("2. Bind (optional): assign prefabs, portraits and sprites per character / item / location in the tabs. Skip this and placeholders are used.");
-            Li("3. Pick a Game style: Top-down (Stardew), Third person, or First person.");
+            Li("3. Pick a Game style: Top-down, Third person, or First person.");
             Li("4. 'Create test scene' → press Play. WASD move, E interact, Tab inventory, hold M story map, F1 debug HUD.");
             Li("5. Re-import any time — bindings and scenes survive; everything is matched by id.");
 
@@ -74,10 +74,11 @@ namespace Storyloom.EditorTools
             GUILayout.Space(12);
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("Open Storyloom window", GUILayout.Height(26))) StoryloomEditorWindow.Open();
-                if (GUILayout.Button("README", GUILayout.Height(26))) OpenDoc("README.md");
-                if (GUILayout.Button("Changelog", GUILayout.Height(26))) OpenDoc("CHANGELOG.md");
-                if (GUILayout.Button("Check for updates", GUILayout.Height(26))) StoryloomUpdateCheck.ManualCheck();
+                // deferred: opening windows / dialogs inside OnGUI can unbalance the active layout group
+                if (GUILayout.Button("Open Storyloom window", GUILayout.Height(26))) EditorApplication.delayCall += StoryloomEditorWindow.Open;
+                if (GUILayout.Button("README", GUILayout.Height(26))) EditorApplication.delayCall += () => OpenDoc("README.md");
+                if (GUILayout.Button("Changelog", GUILayout.Height(26))) EditorApplication.delayCall += () => OpenDoc("CHANGELOG.md");
+                if (GUILayout.Button("Check for updates", GUILayout.Height(26))) EditorApplication.delayCall += StoryloomUpdateCheck.ManualCheck;
             }
 
             GUILayout.Space(8);
