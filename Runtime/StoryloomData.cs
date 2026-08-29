@@ -186,6 +186,7 @@ namespace Storyloom
         public Relationship[] relationships;
         public string voice;               // voice direction note (tone, accent, pace)
         public VoiceClip[] voiceSamples;   // reference clips for casting / VO
+        public Bark[] barks;               // idle / revisit lines (see Bark)
 
         public bool IsProtagonist => string.Equals(roleType, "protagonist", StringComparison.OrdinalIgnoreCase) || string.Equals(roleType, "player", StringComparison.OrdinalIgnoreCase);
         public bool IsAntagonist  => string.Equals(roleType, "antagonist", StringComparison.OrdinalIgnoreCase);
