@@ -29,7 +29,7 @@ namespace Storyloom.EditorTools
             bool hasB = _b != null;
             FlowButtons(26,
                 ("Import story JSON…", true, (System.Action)ImportJson),
-                ("Re-sync from story", hasB, () => { Undo.RecordObject(_b, "Sync"); int n = _b.SyncFromStory(); EditorUtility.SetDirty(_b); ShowNotification(new GUIContent($"{n} new entr{(n == 1 ? "y" : "ies")}")); }),
+                ("Re-sync from story", hasB, (System.Action)ReSync),
                 ("Create placeholder prefabs", hasB && !Application.isPlaying, () => CreatePlaceholders()),
                 ("Generate entity assets", hasB && !Application.isPlaying, (System.Action)GenerateEntityAssets),
                 ("Create test scene", hasB && !Application.isPlaying, () => CreateScene(_b.gameStyle)),
@@ -56,6 +56,17 @@ namespace Storyloom.EditorTools
             if (_b.story == null || _b.story.Story == null) { EditorGUILayout.HelpBox("Bindings has no story asset.", MessageType.Warning); return; }
             var s = _b.story.Story;
             EditorGUILayout.LabelField($"{s.name} — {s.nodes?.Length ?? 0} nodes · {s.characters?.Length ?? 0} characters · {s.items?.Length ?? 0} items · {s.locations?.Length ?? 0} locations · {_b.discoverables.Count} discoverables", EditorStyles.miniLabel);
+            // live link: when a workbook URL is set, "Re-sync from story" pulls the latest export from it before syncing
+            EditorGUI.BeginChangeCheck();
+            var newUrl = EditorGUILayout.TextField(new GUIContent("Live link URL", "The URL that serves this workbook's Unity JSON (same payload as File ▸ Export Unity JSON on storyloom.com). Set it and 'Re-sync from story' pulls straight from the workbook — no download/import round-trip. Leave empty to keep re-sync local."), _b.story.liveUrl);
+            if (EditorGUI.EndChangeCheck()) { Undo.RecordObject(_b.story, "Live link"); _b.story.liveUrl = newUrl; EditorUtility.SetDirty(_b.story); }
+            if (!string.IsNullOrEmpty(_b.story.liveUrl))
+            {
+                var tok = EditorPrefs.GetString(LiveTokenKey, "");
+                var newTok = EditorGUILayout.PasswordField(new GUIContent("Access token", "Sent as 'Authorization: Bearer <token>' when pulling. Stored per-machine in EditorPrefs — never committed with the project."), tok);
+                if (newTok != tok) EditorPrefs.SetString(LiveTokenKey, newTok);
+                EditorGUILayout.LabelField(_pullStatus ?? "Linked — 'Re-sync from story' pulls the workbook's current export, then refreshes bindings" + (AssetDatabase.IsValidFolder(Root + "/Entities") ? ", entity assets" : "") + (File.Exists(Root + "/StoryIds.cs") ? " and StoryIds.cs" : "") + ".", EditorStyles.wordWrappedMiniLabel);
+            }
             using (new EditorGUILayout.HorizontalScope())
             {
                 var kb = AssetDatabase.LoadAssetAtPath<StoryloomKeyBinds>(Root + "/Data/StoryloomKeyBinds.asset");
@@ -151,6 +162,82 @@ namespace Storyloom.EditorTools
             if (b == null) { b = CreateInstance<StoryloomBindings>(); AssetDatabase.CreateAsset(b, bindPath); }
             b.story = story; int added = b.SyncFromStory(); EditorUtility.SetDirty(b); AssetDatabase.SaveAssets();
             _b = b; ShowNotification(new GUIContent($"Imported {parsed.name}: {added} new bindings"));
+        }
+
+        // ------------------------------------------------------------------ re-sync / live link
+        // Without a live link, "Re-sync from story" is local only: it re-reads the already-imported JSON and adds binding
+        // rows for entities that appeared in it (refreshing names/kinds), never touching your assignments — the flow being
+        // export on the site → Import story JSON… → Re-sync. With a live link URL on the story asset, the same button first
+        // pulls the workbook's current export from the site and overwrites the imported JSON, then does all of the above,
+        // plus refreshes entity assets and StoryIds.cs when they exist — the whole round-trip in one click.
+        static string LiveTokenKey => "Storyloom.LiveToken." + PlayerSettings.productGUID;
+        string _pullStatus;
+        void ReSync()
+        {
+            if (_b.story != null && !string.IsNullOrEmpty(_b.story.liveUrl)) { PullFromStoryloom(); return; }
+            Undo.RecordObject(_b, "Sync"); int n = _b.SyncFromStory(); EditorUtility.SetDirty(_b);
+            ShowNotification(new GUIContent($"{n} new entr{(n == 1 ? "y" : "ies")}"));
+        }
+        void PullFromStoryloom()
+        {
+            var story = _b.story; var url = story.liveUrl;
+            _pullStatus = "Pulling from " + url + " …"; Repaint();
+            var req = UnityEngine.Networking.UnityWebRequest.Get(url);
+            req.timeout = 20;
+            var tok = EditorPrefs.GetString(LiveTokenKey, "");
+            if (!string.IsNullOrEmpty(tok)) req.SetRequestHeader("Authorization", "Bearer " + tok);
+            var op = req.SendWebRequest();
+            void Pump()
+            {
+                if (!op.isDone) return;
+                EditorApplication.update -= Pump;
+                using (req)
+                {
+                    if (req.result != UnityEngine.Networking.UnityWebRequest.Result.Success)
+                    { _pullStatus = "Pull failed: " + req.error + (req.responseCode == 401 || req.responseCode == 403 ? " — check the access token" : ""); Debug.LogWarning("Storyloom: live re-sync failed — " + _pullStatus); Repaint(); return; }
+                    ApplyPulledJson(story, req.downloadHandler.text);
+                }
+            }
+            EditorApplication.update += Pump;
+        }
+        void ApplyPulledJson(StoryloomStoryAsset story, string text)
+        {
+            StoryloomStory parsed;
+            try { parsed = StoryloomStory.FromJson(text); }
+            catch (System.Exception e) { _pullStatus = "Pull failed: response is not a Storyloom Unity export (" + e.Message + ")"; Debug.LogWarning("Storyloom: " + _pullStatus); Repaint(); return; }
+            if (parsed.format != "storyloom-unity") { _pullStatus = $"Pull failed: format '{parsed.format}' is not a Unity export"; Debug.LogWarning("Storyloom: " + _pullStatus); Repaint(); return; }
+            var old = story.Story;
+            // write into the same TextAsset the import created, so every reference keeps working
+            var jsonPath = story.json ? AssetDatabase.GetAssetPath(story.json) : null;
+            if (!string.IsNullOrEmpty(jsonPath)) { File.WriteAllText(jsonPath, text); AssetDatabase.ImportAsset(jsonPath); story.json = AssetDatabase.LoadAssetAtPath<TextAsset>(jsonPath); }
+            else story.jsonText = text;
+            story.sourceInfo = $"{story.liveUrl} · pulled {System.DateTime.Now:yyyy-MM-dd HH:mm} · export v{parsed.version}";
+            story.Invalidate(); EditorUtility.SetDirty(story);
+            Undo.RecordObject(_b, "Sync"); int added = _b.SyncFromStory(); EditorUtility.SetDirty(_b);
+            if (AssetDatabase.IsValidFolder(Root + "/Entities")) GenerateEntityAssets();       // refresh handles + StoryIds + scene stamps
+            else if (File.Exists(Root + "/StoryIds.cs")) GenerateStoryIds();
+            AssetDatabase.SaveAssets();
+            var diff = DiffSummary(old, story.Story);
+            _pullStatus = $"Pulled {parsed.name} (export v{parsed.version}) at {System.DateTime.Now:HH:mm}" + (diff.Length > 0 ? " — " + diff : " — no entity changes");
+            Debug.Log("Storyloom: live re-sync — " + _pullStatus + (added > 0 ? $" · {added} new binding row(s)" : ""));
+            ShowNotification(new GUIContent("Re-synced from workbook" + (diff.Length > 0 ? " — " + diff : ""))); Repaint();
+        }
+        /// <summary>"+2 characters · −1 item · +3 nodes" — what appeared/vanished between two versions of the story.</summary>
+        static string DiffSummary(StoryloomStory a, StoryloomStory b)
+        {
+            if (a == null || b == null) return "";
+            var parts = new List<string>();
+            void Cat(string label, IEnumerable<string> oldIds, IEnumerable<string> newIds)
+            {
+                var o = new HashSet<string>(oldIds ?? Enumerable.Empty<string>()); var n = new HashSet<string>(newIds ?? Enumerable.Empty<string>());
+                int plus = n.Count(x => !o.Contains(x)), minus = o.Count(x => !n.Contains(x));
+                if (plus > 0) parts.Add($"+{plus} {label}"); if (minus > 0) parts.Add($"−{minus} {label}");
+            }
+            Cat("characters", (a.characters ?? new Character[0]).Select(x => x.id), (b.characters ?? new Character[0]).Select(x => x.id));
+            Cat("items", (a.items ?? new Item[0]).Select(x => x.id), (b.items ?? new Item[0]).Select(x => x.id));
+            Cat("locations", (a.locations ?? new Location[0]).Select(x => x.id), (b.locations ?? new Location[0]).Select(x => x.id));
+            Cat("nodes", (a.nodes ?? new StoryNode[0]).Select(x => x.id), (b.nodes ?? new StoryNode[0]).Select(x => x.id));
+            return string.Join(" · ", parts);
         }
 
         // ------------------------------------------------------------------ starting variables

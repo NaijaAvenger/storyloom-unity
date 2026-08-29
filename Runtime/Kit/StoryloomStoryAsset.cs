@@ -12,6 +12,8 @@ namespace Storyloom
         [TextArea(3, 8)] public string sourceInfo;   // where it came from, export date — informational
         public TextAsset json;                        // the exported *.unity.json
         [HideInInspector] public string jsonText;     // fallback copy when no TextAsset is assigned
+        [Tooltip("Live link: the URL that serves this workbook's Unity JSON export (same payload as File ▸ Export Unity JSON on storyloom.com). When set, 'Re-sync from story' pulls the latest export from here — no manual download/import round-trip. Auth token, if the workbook needs one, is stored per-machine in the editor, never in this asset.")]
+        public string liveUrl;                        // empty = no live link; re-sync stays local
 
         [NonSerialized] private StoryloomStory _story;
 
