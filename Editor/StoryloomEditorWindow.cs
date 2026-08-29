@@ -10,6 +10,9 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+#if ENABLE_INPUT_SYSTEM
+using Key = UnityEngine.InputSystem.Key;   // matches the alias StoryloomKeyBinds uses; the legacy fallback enum is Storyloom.Key
+#endif
 
 namespace Storyloom.EditorTools
 {
@@ -74,11 +77,14 @@ namespace Storyloom.EditorTools
                 if (newTok != tok) { EditorPrefs.SetString(LiveTokenKey, newTok); _link = LinkStatus.None; }   // new credentials → re-link
                 EditorGUILayout.LabelField(_pullStatus ?? "'Re-sync from Live Link' pulls the workbook's current export, then refreshes bindings" + (AssetDatabase.IsValidFolder(Root + "/Entities") ? ", entity assets" : "") + (File.Exists(Root + "/StoryIds.cs") ? " and StoryIds.cs" : "") + ".", EditorStyles.wordWrappedMiniLabel);
             }
-            using (new EditorGUILayout.HorizontalScope())
             {
                 var kb = AssetDatabase.LoadAssetAtPath<StoryloomKeyBinds>(Root + "/Data/StoryloomKeyBinds.asset");
-                EditorGUILayout.LabelField("Key binds", kb ? kb.HelpLine() : "(created with the scene)", EditorStyles.wordWrappedMiniLabel);
-                if (kb && GUILayout.Button("Reset to defaults", GUILayout.Width(120))) { Undo.RecordObject(kb, "Reset binds"); var d = ScriptableObject.CreateInstance<StoryloomKeyBinds>(); EditorUtility.CopySerialized(d, kb); DestroyImmediate(d); EditorUtility.SetDirty(kb); AssetDatabase.SaveAssets(); }
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField("Key binds", kb ? kb.HelpLine() : "(created with the scene)", EditorStyles.wordWrappedMiniLabel);
+                    if (kb && GUILayout.Button("Reset to defaults", GUILayout.Width(120))) { Undo.RecordObject(kb, "Reset binds"); var d = ScriptableObject.CreateInstance<StoryloomKeyBinds>(); EditorUtility.CopySerialized(d, kb); DestroyImmediate(d); EditorUtility.SetDirty(kb); AssetDatabase.SaveAssets(); kb.Rebuild(); _listenField = null; }
+                }
+                if (kb) DrawBindEditor(kb);
             }
             _b.defaultNpcPrefab = (GameObject)EditorGUILayout.ObjectField("Default NPC prefab", _b.defaultNpcPrefab, typeof(GameObject), false);
             _b.defaultItemPrefab = (GameObject)EditorGUILayout.ObjectField("Default item prefab", _b.defaultItemPrefab, typeof(GameObject), false);
@@ -171,6 +177,88 @@ namespace Storyloom.EditorTools
             if (b == null) { b = CreateInstance<StoryloomBindings>(); AssetDatabase.CreateAsset(b, bindPath); }
             b.story = story; int added = b.SyncFromStory(); EditorUtility.SetDirty(b); AssetDatabase.SaveAssets();
             _b = b; ShowNotification(new GUIContent($"Imported {parsed.name}: {added} new bindings"));
+        }
+
+        // ------------------------------------------------------------------ key binds editor
+        // Click a bind → the window listens for the next key press → Apply commits it (Cancel or another bind aborts).
+        // Overlaps prompt: confirming swaps, so the action that held the new key takes this bind's old key — no dead binds.
+        static readonly (string label, string field)[] BindFields = {
+            ("Move up", "up"), ("Move down", "down"), ("Move left", "left"), ("Move right", "right"),
+            ("Move up (alt)", "altUp"), ("Move down (alt)", "altDown"), ("Move left (alt)", "altLeft"), ("Move right (alt)", "altRight"),
+            ("Run (hold)", "run"), ("Interact", "interact"), ("Interact (alt)", "interactAlt"), ("Advance dialogue", "advance"),
+            ("Cancel / free mouse", "cancel"), ("Inventory", "inventory"), ("Inventory (alt)", "inventoryAlt"), ("Journal", "journal"), ("Story map (hold)", "map") };
+        bool _showBinds; string _listenField; Key _capturedKey; bool _hasCaptured;
+        static StoryloomKeyBinds _bindDefaults;
+        static StoryloomKeyBinds BindDefaults { get { if (!_bindDefaults) { _bindDefaults = CreateInstance<StoryloomKeyBinds>(); _bindDefaults.hideFlags = HideFlags.HideAndDontSave; } return _bindDefaults; } }
+        static string KeyName(Key k) { var s = k.ToString(); return s.StartsWith("Digit") ? s.Substring(5) : s; }
+        static bool TryKeyFromEvent(Event e, out Key k)
+        {
+            k = default;
+            var name = e.keyCode.ToString();
+            if (e.keyCode == KeyCode.None)   // modifier-only presses arrive with keyCode None and a modifier flag
+            {
+                if ((e.modifiers & EventModifiers.Shift) != 0) name = "LeftShift";
+                else if ((e.modifiers & EventModifiers.Control) != 0) name = "LeftCtrl";
+                else if ((e.modifiers & EventModifiers.Alt) != 0) name = "LeftAlt";
+                else return false;
+            }
+            if (name.StartsWith("Alpha")) name = "Digit" + name.Substring(5);
+            else if (name.StartsWith("Keypad")) name = "Numpad" + name.Substring(6);
+            else if (name == "LeftControl") name = "LeftCtrl"; else if (name == "RightControl") name = "RightCtrl";
+            else if (name == "Return") name = "Enter";
+            return System.Enum.TryParse(name, out k);
+        }
+        void DrawBindEditor(StoryloomKeyBinds kb)
+        {
+            _showBinds = EditorGUILayout.Foldout(_showBinds, "Edit key binds", true);
+            if (!_showBinds) { _listenField = null; return; }
+            // listening: swallow the next key press as the pending bind
+            var e = Event.current;
+            if (_listenField != null && e.type == EventType.KeyDown && TryKeyFromEvent(e, out var pressed)) { _capturedKey = pressed; _hasCaptured = true; e.Use(); Repaint(); }
+            foreach (var (label, field) in BindFields)
+            {
+                var fi = typeof(StoryloomKeyBinds).GetField(field);
+                var cur = (Key)fi.GetValue(kb);
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField(label, GUILayout.Width(150));
+                    if (_listenField == field)
+                    {
+                        GUILayout.Box(_hasCaptured ? "→ " + KeyName(_capturedKey) : "press a key…", GUILayout.Width(120), GUILayout.Height(18));
+                        using (new EditorGUI.DisabledScope(!_hasCaptured))
+                            if (GUILayout.Button("Apply", GUILayout.Width(56))) { var f2 = fi; var l2 = label; EditorApplication.delayCall += () => ApplyBind(kb, f2, l2); }
+                        if (GUILayout.Button("Cancel", GUILayout.Width(56))) { _listenField = null; _hasCaptured = false; }
+                    }
+                    else if (GUILayout.Button(KeyName(cur), GUILayout.Width(120))) { _listenField = field; _hasCaptured = false; }
+                    var def = (Key)fi.GetValue(BindDefaults);
+                    EditorGUILayout.LabelField("default: " + KeyName(def) + (cur.Equals(def) ? "" : "  (changed)"), EditorStyles.miniLabel);
+                }
+            }
+            EditorGUILayout.LabelField("Click a bind, press the new key, Apply. Gamepad bindings are fixed (left stick move, south interact, east cancel, north inventory).", EditorStyles.wordWrappedMiniLabel);
+        }
+        void ApplyBind(StoryloomKeyBinds kb, System.Reflection.FieldInfo fi, string label)
+        {
+            if (!_hasCaptured || kb == null) return;
+            var newKey = _capturedKey; var oldKey = (Key)fi.GetValue(kb);
+            _listenField = null; _hasCaptured = false;
+            if (newKey.Equals(oldKey)) { Repaint(); return; }
+            var conflicts = BindFields.Where(b => b.field != fi.Name)
+                .Select(b => (b.label, f: typeof(StoryloomKeyBinds).GetField(b.field)))
+                .Where(x => ((Key)x.f.GetValue(kb)).Equals(newKey)).ToList();
+            if (conflicts.Count > 0)
+            {
+                var names = string.Join(", ", conflicts.Select(c => c.label));
+                if (!EditorUtility.DisplayDialog("Keybind overlap",
+                    $"{KeyName(newKey)} is already bound to: {names}.\n\nSwap? {names} will take this bind's old key ({KeyName(oldKey)}), and {label} becomes {KeyName(newKey)}.",
+                    "Swap binds", "Cancel")) { Repaint(); return; }
+            }
+            Undo.RecordObject(kb, "Edit key bind");
+            foreach (var c in conflicts) c.f.SetValue(kb, oldKey);
+            fi.SetValue(kb, newKey);
+            EditorUtility.SetDirty(kb); AssetDatabase.SaveAssets();
+            kb.Rebuild();   // live sessions pick the change up immediately
+            Debug.Log($"Storyloom: {label} → {KeyName(newKey)}" + (conflicts.Count > 0 ? $" (swapped: {string.Join(", ", conflicts.Select(c => c.label))} → {KeyName(oldKey)})" : ""));
+            Repaint();
         }
 
         // ------------------------------------------------------------------ re-sync / live link
