@@ -262,6 +262,23 @@ namespace Storyloom.EditorTools
             catch (System.Exception e) { _link = LinkStatus.Failed; _pullStatus = "Pull failed: response is not a Storyloom Unity export (" + e.Message + ")"; Debug.LogWarning("Storyloom: " + _pullStatus); Repaint(); return; }
             if (parsed.format != "storyloom-unity") { _link = LinkStatus.Failed; _pullStatus = $"Pull failed: format '{parsed.format}' is not a Unity export"; Debug.LogWarning("Storyloom: " + _pullStatus); Repaint(); return; }
             var old = story.Story;
+            // review before apply: every change checkable, id churn offered as migration so nothing duplicates
+            var entries = StoryloomSyncReview.Diff(old, parsed);
+            if (old != null && entries.Count == 0) { _pullStatus = $"Pulled {parsed.name} — no changes ({System.DateTime.Now:HH:mm})"; Repaint(); return; }
+            if (old != null)
+            {
+                StoryloomSyncReviewWindow.Open(parsed.name, entries, apply =>
+                {
+                    if (!apply) { _pullStatus = "Pull reviewed — ignored, nothing applied"; Repaint(); return; }
+                    if (StoryloomSyncReview.ApplyDecisions(old, parsed, entries, _b)) { text = JsonUtility.ToJson(parsed, true); parsed.BuildIndexes(); }
+                    CommitPulledJson(story, text, parsed, old);
+                });
+                return;
+            }
+            CommitPulledJson(story, text, parsed, old);
+        }
+        void CommitPulledJson(StoryloomStoryAsset story, string text, StoryloomStory parsed, StoryloomStory old)
+        {
             // write into the same TextAsset the import created, so every reference keeps working
             var jsonPath = story.json ? AssetDatabase.GetAssetPath(story.json) : null;
             if (!string.IsNullOrEmpty(jsonPath)) { File.WriteAllText(jsonPath, text); AssetDatabase.ImportAsset(jsonPath); story.json = AssetDatabase.LoadAssetAtPath<TextAsset>(jsonPath); }
