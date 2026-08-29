@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.9.0
+- **Live Link status**: the re-sync button is now “Re-sync from Live Link” with a status dot — red (not linked), yellow (attempting), green (link established). A Link / Re-link button next to the URL field establishes the link (disabled while green; editing the URL or token, or a failure, re-enables it), and a lightweight probe (HEAD, GET fallback — no export payload) re-checks the link every 60 s while the window is open. Pulls drive the same indicator.
 - **Live link: re-sync straight from a workbook.** Set a Live link URL on the story asset (field appears in the window; the endpoint serves the same payload as File ▸ Export Unity JSON) and **Re-sync from story** pulls the workbook’s current export, overwrites the imported JSON in place, refreshes binding rows, regenerates entity assets / StoryIds.cs when present, and reports the entity diff (“+2 characters · −1 node”). Optional token sent as Authorization: Bearer, stored per-machine in EditorPrefs. No URL = the old local behaviour (re-read the imported JSON, add rows for new entities).
 
 ## 0.8.0

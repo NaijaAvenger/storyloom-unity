@@ -21,7 +21,8 @@ namespace Storyloom.EditorTools
         StoryloomBindings _b; Vector2 _scroll; int _tab; string[] _tabs = { "Characters", "Items", "Locations", "Discoverables", "Entities", "Variables", "Validate" };
         const string Root = "Assets/Storyloom";
 
-        void OnEnable() { if (_b == null) _b = AssetDatabase.FindAssets("t:StoryloomBindings").Select(g => AssetDatabase.LoadAssetAtPath<StoryloomBindings>(AssetDatabase.GUIDToAssetPath(g))).FirstOrDefault(); }
+        void OnEnable() { if (_b == null) _b = AssetDatabase.FindAssets("t:StoryloomBindings").Select(g => AssetDatabase.LoadAssetAtPath<StoryloomBindings>(AssetDatabase.GUIDToAssetPath(g))).FirstOrDefault(); EditorApplication.update += LinkTick; }
+        void OnDisable() { EditorApplication.update -= LinkTick; }
 
         void OnGUI()
         {
@@ -29,7 +30,7 @@ namespace Storyloom.EditorTools
             bool hasB = _b != null;
             FlowButtons(26,
                 ("Import story JSON…", true, (System.Action)ImportJson),
-                ("Re-sync from story", hasB, (System.Action)ReSync),
+                (LinkDot() + "Re-sync from Live Link", hasB, (System.Action)ReSync),
                 ("Create placeholder prefabs", hasB && !Application.isPlaying, () => CreatePlaceholders()),
                 ("Generate entity assets", hasB && !Application.isPlaying, (System.Action)GenerateEntityAssets),
                 ("Create test scene", hasB && !Application.isPlaying, () => CreateScene(_b.gameStyle)),
@@ -56,16 +57,22 @@ namespace Storyloom.EditorTools
             if (_b.story == null || _b.story.Story == null) { EditorGUILayout.HelpBox("Bindings has no story asset.", MessageType.Warning); return; }
             var s = _b.story.Story;
             EditorGUILayout.LabelField($"{s.name} — {s.nodes?.Length ?? 0} nodes · {s.characters?.Length ?? 0} characters · {s.items?.Length ?? 0} items · {s.locations?.Length ?? 0} locations · {_b.discoverables.Count} discoverables", EditorStyles.miniLabel);
-            // live link: when a workbook URL is set, "Re-sync from story" pulls the latest export from it before syncing
-            EditorGUI.BeginChangeCheck();
-            var newUrl = EditorGUILayout.TextField(new GUIContent("Live link URL", "The URL that serves this workbook's Unity JSON (same payload as File ▸ Export Unity JSON on storyloom.com). Set it and 'Re-sync from story' pulls straight from the workbook — no download/import round-trip. Leave empty to keep re-sync local."), _b.story.liveUrl);
-            if (EditorGUI.EndChangeCheck()) { Undo.RecordObject(_b.story, "Live link"); _b.story.liveUrl = newUrl; EditorUtility.SetDirty(_b.story); }
+            // live link: when a workbook URL is set, "Re-sync from Live Link" pulls the latest export from it before syncing
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUI.BeginChangeCheck();
+                var newUrl = EditorGUILayout.TextField(new GUIContent("Live link URL", "The URL that serves this workbook's Unity JSON (same payload as File ▸ Export Unity JSON on storyloom.com). Set it and 'Re-sync from Live Link' pulls straight from the workbook — no download/import round-trip. Leave empty to keep re-sync local."), _b.story.liveUrl);
+                if (EditorGUI.EndChangeCheck()) { Undo.RecordObject(_b.story, "Live link"); _b.story.liveUrl = newUrl; EditorUtility.SetDirty(_b.story); _link = LinkStatus.None; }   // edited → must re-link
+                bool canLink = !string.IsNullOrEmpty(_b.story.liveUrl) && _link != LinkStatus.Linked && _link != LinkStatus.Checking;
+                using (new EditorGUI.DisabledScope(!canLink))
+                    if (GUILayout.Button(_link == LinkStatus.Failed ? "Re-link" : "Link", GUILayout.Width(64))) CheckLink();
+            }
             if (!string.IsNullOrEmpty(_b.story.liveUrl))
             {
                 var tok = EditorPrefs.GetString(LiveTokenKey, "");
                 var newTok = EditorGUILayout.PasswordField(new GUIContent("Access token", "Sent as 'Authorization: Bearer <token>' when pulling. Stored per-machine in EditorPrefs — never committed with the project."), tok);
-                if (newTok != tok) EditorPrefs.SetString(LiveTokenKey, newTok);
-                EditorGUILayout.LabelField(_pullStatus ?? "Linked — 'Re-sync from story' pulls the workbook's current export, then refreshes bindings" + (AssetDatabase.IsValidFolder(Root + "/Entities") ? ", entity assets" : "") + (File.Exists(Root + "/StoryIds.cs") ? " and StoryIds.cs" : "") + ".", EditorStyles.wordWrappedMiniLabel);
+                if (newTok != tok) { EditorPrefs.SetString(LiveTokenKey, newTok); _link = LinkStatus.None; }   // new credentials → re-link
+                EditorGUILayout.LabelField(_pullStatus ?? "'Re-sync from Live Link' pulls the workbook's current export, then refreshes bindings" + (AssetDatabase.IsValidFolder(Root + "/Entities") ? ", entity assets" : "") + (File.Exists(Root + "/StoryIds.cs") ? " and StoryIds.cs" : "") + ".", EditorStyles.wordWrappedMiniLabel);
             }
             using (new EditorGUILayout.HorizontalScope())
             {
@@ -113,8 +120,10 @@ namespace Storyloom.EditorTools
         // Toolbar buttons flow into as many rows as the window's width needs, instead of demanding a very wide window.
         // Actions run via delayCall — after OnGUI finishes — so anything that opens a window, rebuilds assets, or pops a
         // dialog can't unbalance the active layout ("EndLayoutGroup: BeginLayoutGroup must be called first").
+        static GUIStyle _flowBtn;   // rich text on, so status dots (<color>●</color>) render in button labels
         void FlowButtons(float height, params (string label, bool enabled, System.Action act)[] items)
         {
+            if (_flowBtn == null) _flowBtn = new GUIStyle(GUI.skin.button) { richText = true };
             float w = EditorGUIUtility.currentViewWidth - 16f;
             int perRow = Mathf.Clamp(Mathf.FloorToInt(w / 170f), 1, items.Length);
             for (int i = 0; i < items.Length; i += perRow)
@@ -125,7 +134,7 @@ namespace Storyloom.EditorTools
                     {
                         var it = items[j];
                         using (new EditorGUI.DisabledScope(!it.enabled))
-                            if (GUILayout.Button(it.label, GUILayout.Height(height))) EditorApplication.delayCall += () => it.act();
+                            if (GUILayout.Button(it.label, _flowBtn, GUILayout.Height(height))) EditorApplication.delayCall += () => it.act();
                     }
                 }
             }
@@ -172,6 +181,50 @@ namespace Storyloom.EditorTools
         // plus refreshes entity assets and StoryIds.cs when they exist — the whole round-trip in one click.
         static string LiveTokenKey => "Storyloom.LiveToken." + PlayerSettings.productGUID;
         string _pullStatus;
+
+        // ---- link status: red = not linked, yellow = attempting, green = link established.
+        // A lightweight probe (HEAD — no export payload; one-off GET fallback when the server doesn't do HEAD) checks the
+        // link every LinkCheckEvery seconds while the window is open, and immediately via the Link button or a pull.
+        enum LinkStatus { None, Checking, Linked, Failed }
+        LinkStatus _link = LinkStatus.None;
+        double _nextLinkCheck; const double LinkCheckEvery = 60;
+        string LinkDot() => _link == LinkStatus.Checking ? "<color=#e0c455>●</color> " : _link == LinkStatus.Linked ? "<color=#57c757>●</color> " : "<color=#e05555>●</color> ";
+        void LinkTick()
+        {
+            if (_b == null || _b.story == null || string.IsNullOrEmpty(_b.story.liveUrl)) { if (_link != LinkStatus.None) { _link = LinkStatus.None; Repaint(); } return; }
+            if (_link == LinkStatus.Checking || EditorApplication.timeSinceStartup < _nextLinkCheck) return;
+            CheckLink();
+        }
+        void CheckLink()
+        {
+            var url = _b != null && _b.story != null ? _b.story.liveUrl : null;
+            if (string.IsNullOrEmpty(url)) { _link = LinkStatus.None; return; }
+            _link = LinkStatus.Checking; _nextLinkCheck = EditorApplication.timeSinceStartup + LinkCheckEvery; Repaint();
+            Probe(url, useHead: true);
+        }
+        void Probe(string url, bool useHead)
+        {
+            var req = useHead ? UnityEngine.Networking.UnityWebRequest.Head(url) : UnityEngine.Networking.UnityWebRequest.Get(url);
+            req.timeout = 10;
+            var tok = EditorPrefs.GetString(LiveTokenKey, "");
+            if (!string.IsNullOrEmpty(tok)) req.SetRequestHeader("Authorization", "Bearer " + tok);
+            var op = req.SendWebRequest();
+            void Pump()
+            {
+                if (!op.isDone) return;
+                EditorApplication.update -= Pump;
+                using (req)
+                {
+                    if (useHead && (req.responseCode == 405 || req.responseCode == 501)) { Probe(url, false); return; }   // no HEAD on this server
+                    bool ok = req.result == UnityEngine.Networking.UnityWebRequest.Result.Success;
+                    _link = ok ? LinkStatus.Linked : LinkStatus.Failed;
+                    _pullStatus = ok ? $"Link OK · checked {System.DateTime.Now:HH:mm:ss} (re-checks every {LinkCheckEvery:0}s)"
+                                     : "Link failed: " + req.error + (req.responseCode == 401 || req.responseCode == 403 ? " — check the access token" : "");
+                    Repaint();
+                }
+            }
+            EditorApplication.update += Pump;
+        }
         void ReSync()
         {
             if (_b.story != null && !string.IsNullOrEmpty(_b.story.liveUrl)) { PullFromStoryloom(); return; }
@@ -182,6 +235,7 @@ namespace Storyloom.EditorTools
         {
             var story = _b.story; var url = story.liveUrl;
             _pullStatus = "Pulling from " + url + " …"; Repaint();
+            _link = LinkStatus.Checking; _nextLinkCheck = EditorApplication.timeSinceStartup + LinkCheckEvery;
             var req = UnityEngine.Networking.UnityWebRequest.Get(url);
             req.timeout = 20;
             var tok = EditorPrefs.GetString(LiveTokenKey, "");
@@ -194,7 +248,8 @@ namespace Storyloom.EditorTools
                 using (req)
                 {
                     if (req.result != UnityEngine.Networking.UnityWebRequest.Result.Success)
-                    { _pullStatus = "Pull failed: " + req.error + (req.responseCode == 401 || req.responseCode == 403 ? " — check the access token" : ""); Debug.LogWarning("Storyloom: live re-sync failed — " + _pullStatus); Repaint(); return; }
+                    { _link = LinkStatus.Failed; _pullStatus = "Pull failed: " + req.error + (req.responseCode == 401 || req.responseCode == 403 ? " — check the access token" : ""); Debug.LogWarning("Storyloom: live re-sync failed — " + _pullStatus); Repaint(); return; }
+                    _link = LinkStatus.Linked;
                     ApplyPulledJson(story, req.downloadHandler.text);
                 }
             }
@@ -204,8 +259,8 @@ namespace Storyloom.EditorTools
         {
             StoryloomStory parsed;
             try { parsed = StoryloomStory.FromJson(text); }
-            catch (System.Exception e) { _pullStatus = "Pull failed: response is not a Storyloom Unity export (" + e.Message + ")"; Debug.LogWarning("Storyloom: " + _pullStatus); Repaint(); return; }
-            if (parsed.format != "storyloom-unity") { _pullStatus = $"Pull failed: format '{parsed.format}' is not a Unity export"; Debug.LogWarning("Storyloom: " + _pullStatus); Repaint(); return; }
+            catch (System.Exception e) { _link = LinkStatus.Failed; _pullStatus = "Pull failed: response is not a Storyloom Unity export (" + e.Message + ")"; Debug.LogWarning("Storyloom: " + _pullStatus); Repaint(); return; }
+            if (parsed.format != "storyloom-unity") { _link = LinkStatus.Failed; _pullStatus = $"Pull failed: format '{parsed.format}' is not a Unity export"; Debug.LogWarning("Storyloom: " + _pullStatus); Repaint(); return; }
             var old = story.Story;
             // write into the same TextAsset the import created, so every reference keeps working
             var jsonPath = story.json ? AssetDatabase.GetAssetPath(story.json) : null;
