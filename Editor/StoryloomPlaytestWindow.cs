@@ -12,7 +12,9 @@ namespace Storyloom.EditorTools
     public class StoryloomPlaytestWindow : EditorWindow
     {
         [MenuItem("Window/Storyloom Playtest")] public static void Open() => GetWindow<StoryloomPlaytestWindow>("Playtest");
-        Vector2 _scroll; string _filter = ""; bool _showBeats = true, _showHistory = true, _showVars = true, _showItems = true;
+        Vector2 _scroll; string _filter = ""; bool _showBeats = true, _showHistory = true, _showVars = true, _showItems = true, _showTranscript = true;
+        static string TranscriptText(StoryloomDirector d) =>
+            $"# {(d.Story != null ? d.Story.name : "Storyloom")} — playthrough {System.DateTime.Now:yyyy-MM-dd HH:mm}\n\n" + string.Join("\n", d.Transcript);
 
         void OnInspectorUpdate() { if (Application.isPlaying) Repaint(); }
 
@@ -33,9 +35,31 @@ namespace Storyloom.EditorTools
                 d.gateByLocation = GUILayout.Toggle(d.gateByLocation, "Location gate", EditorStyles.miniButton);
                 d.gateDialogueByCharacter = GUILayout.Toggle(d.gateDialogueByCharacter, "Dialogue gate", EditorStyles.miniButton);
                 d.autoPlaySceneBeatsOnEnter = GUILayout.Toggle(d.autoPlaySceneBeatsOnEnter, "Auto scene beats", EditorStyles.miniButton);
+                if (GUILayout.Button(new GUIContent("Hot-reload story", "Rebuild the runner from the story asset without leaving play mode — variables, inventory and played beats survive. A live-link pull during play triggers this automatically."), EditorStyles.miniButton)) d.RequestHotReload();
             }
 
             _scroll = EditorGUILayout.BeginScrollView(_scroll);
+
+            _showTranscript = EditorGUILayout.Foldout(_showTranscript, $"Transcript ({d.Transcript.Count} lines)", true);
+            if (_showTranscript)
+            {
+                d.recordTranscript = EditorGUILayout.ToggleLeft("Record transcript", d.recordTranscript);
+                foreach (var line in d.Transcript.Skip(Mathf.Max(0, d.Transcript.Count - 12)))
+                    EditorGUILayout.LabelField(line, EditorStyles.miniLabel);
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    using (new EditorGUI.DisabledScope(d.Transcript.Count == 0))
+                    {
+                        if (GUILayout.Button("Copy", GUILayout.Width(60))) EditorGUIUtility.systemCopyBuffer = TranscriptText(d);
+                        if (GUILayout.Button("Save…", GUILayout.Width(60)))
+                        {
+                            var path = EditorUtility.SaveFilePanel("Save transcript", "", (d.Story != null ? d.Story.name : "storyloom") + "-playthrough.md", "md");
+                            if (!string.IsNullOrEmpty(path)) { System.IO.File.WriteAllText(path, TranscriptText(d)); EditorUtility.RevealInFinder(path); }
+                        }
+                        if (GUILayout.Button("Clear", GUILayout.Width(60))) d.Transcript.Clear();
+                    }
+                }
+            }
 
             _showHistory = EditorGUILayout.Foldout(_showHistory, $"History — rewind ({d.History.Count})", true);
             if (_showHistory)

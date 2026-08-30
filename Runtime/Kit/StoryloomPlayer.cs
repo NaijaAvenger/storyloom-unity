@@ -38,7 +38,7 @@ namespace Storyloom
         protected virtual void OnEnable() { Current = this; }
         protected virtual void OnDisable() { if (Current == this) Current = null; }
         protected bool InBeat => StoryloomDirector.Instance && StoryloomDirector.Instance.InBeat;
-        protected bool InventoryOpen => StoryloomDirector.Instance && StoryloomDirector.Instance.InventoryOpen;
+        protected bool InventoryOpen => StoryloomDirector.Instance && StoryloomDirector.Instance.UiBusy;   // any modal kit panel (inventory or journal) freezes look
 
         protected void SetFocus(Interactable best)
         {
@@ -57,6 +57,12 @@ namespace Storyloom
                 var inv = d ? d.Inventory : null;
                 if (inv != null) { inv.Toggle(); StoryloomDirector.Note("Inventory key → " + (inv.IsOpen ? "opened" : "closed")); }
                 else { StoryloomDirector.Note("Inventory key pressed but no inventory UI in the scene"); Debug.LogWarning("Storyloom: inventory key pressed but the director has no inventory UI (built-in or IInventoryUI override)"); }
+            }
+            if (keys.JournalDown())
+            {
+                var d = StoryloomDirector.Instance; if (d && !d.journalUi) d.ResolveUI();
+                if (d && d.journalUi) { d.journalUi.Toggle(); StoryloomDirector.Note("Journal key → " + (d.journalUi.IsOpen ? "opened" : "closed")); }
+                else StoryloomDirector.Note("Journal key pressed but no StoryJournalUI in the scene (regenerate or repair the scene)");
             }
         }
     }
@@ -133,7 +139,7 @@ namespace Storyloom
         {
             if (!enabledLock) { Cursor.lockState = CursorLockMode.None; Cursor.visible = true; return; }
             var d = StoryloomDirector.Instance;
-            bool busy = (d && d.InBeat) || (d && d.InventoryOpen);
+            bool busy = (d && d.InBeat) || (d && d.UiBusy);
             if (keys && keys.CancelDown() && !busy) _released = true;
             if (_released && !busy && keys && keys.AdvanceDown()) _released = false;   // click / interact grabs the mouse again
             bool free = !busy && !_released;

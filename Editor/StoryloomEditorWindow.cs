@@ -380,6 +380,8 @@ namespace Storyloom.EditorTools
             var diff = DiffSummary(old, story.Story);
             _pullStatus = $"Pulled {parsed.name} (export v{parsed.version}) at {System.DateTime.Now:HH:mm}" + (diff.Length > 0 ? " — " + diff : " — no entity changes");
             Debug.Log("Storyloom: live re-sync — " + _pullStatus + (added > 0 ? $" · {added} new binding row(s)" : ""));
+            // pulled mid-play: hot-swap the running story — variables, inventory and played beats survive (all id-keyed)
+            if (Application.isPlaying && StoryloomDirector.Instance) { StoryloomDirector.Instance.RequestHotReload(); _pullStatus += " · hot-reloaded into the running session"; }
             ShowNotification(new GUIContent("Re-synced from workbook" + (diff.Length > 0 ? " — " + diff : ""))); Repaint();
         }
         /// <summary>"+2 characters · −1 item · +3 nodes" — what appeared/vanished between two versions of the story.</summary>
@@ -875,6 +877,7 @@ namespace Storyloom.EditorTools
             StampEntityAssets();                              // reference the typed entity handles, not just bare ids (no-op if none generated)
             BuildUI(d, style);
             dirGo.AddComponent<StoryloomDebugHud>();
+            dirGo.AddComponent<AmbientBarks>();   // NPCs speak their idle lines when the player walks near
             Directory.CreateDirectory(Root + "/Scenes");
             var suffix = style == GameStyle.TopDown ? "Top-down kit" : style == GameStyle.ThirdPerson ? "Third person kit" : "First person kit";
             var scenePath = $"{Root}/Scenes/{s.name} ({suffix}).unity"; EditorSceneManager.SaveScene(scene, scenePath);
@@ -1058,6 +1061,8 @@ namespace Storyloom.EditorTools
             d.toast = Object.FindObjectOfType<PickupToast>(true) ?? BuildToast(canvasGo);
             d.inventoryHud = Object.FindObjectOfType<InventoryHUD>(true) ?? BuildInventory(canvasGo);
             d.map = Object.FindObjectOfType<StoryMapUI>(true) ?? BuildMap(canvasGo);
+            d.journalUi = Object.FindObjectOfType<StoryJournalUI>(true) ?? BuildJournal(canvasGo);
+            if (Object.FindObjectOfType<ObjectiveHint>(true) == null) { var ot = MakeText(canvasGo.transform, "Objective", "", 16, TextAnchor.UpperLeft, new Color(1, .92f, .6f, .95f)); Fit(ot.gameObject, new Vector2(0, 1), new Vector2(.6f, 1), new Vector2(12, -34), new Vector2(0, -8)); canvasGo.AddComponent<ObjectiveHint>().text = ot; }
             if (wasEmpty.Count > 0) Debug.Log("Storyloom: EnsureUI filled empty director UI ref(s): " + string.Join(", ", wasEmpty) + (Application.isPlaying ? " — this happened DURING PLAY, so the saved scene has them empty; run Repair outside play mode and save" : ""), d);
             // widget wiring sanity: a component that exists but lost its internal refs "exists" to every repair check while
             // doing nothing at runtime — name the broken field instead
@@ -1117,6 +1122,23 @@ namespace Storyloom.EditorTools
             var list = new GameObject("List", typeof(RectTransform), typeof(VerticalLayoutGroup)); list.transform.SetParent(inv.transform, false);  Fit(list, Vector2.zero, Vector2.one, new Vector2(12, 12), new Vector2(-12, -44)); var ll = list.GetComponent<VerticalLayoutGroup>(); ll.childAlignment = TextAnchor.UpperLeft; ll.spacing = 4; ll.childForceExpandHeight = false; ll.childControlHeight = true; ll.childForceExpandWidth = true; ll.childControlWidth = true;
             var row = new GameObject("Row", typeof(RectTransform)); row.transform.SetParent(list.transform, false); row.AddComponent<LayoutElement>().preferredHeight = 28; var ri = Panel(row.transform, "Icon", Color.white);  Fit(ri, new Vector2(0, 0), new Vector2(0, 1), new Vector2(0, 2), new Vector2(24, -2)); var rt = MakeText(row.transform, "Text", "", 16, TextAnchor.MiddleLeft, new Color(.2f, .12f, .05f));  Fit(rt.gameObject, Vector2.zero, Vector2.one, new Vector2(30, 0), Vector2.zero); row.SetActive(false);
             var hud = canvasGo.AddComponent<InventoryHUD>(); hud.panel = inv; hud.listParent = list.transform; hud.rowPrefab = row; inv.SetActive(false); return hud;
+        }
+        // Journal (J): four columns — people met, places visited, lore learned, items held — over state the runner tracks.
+        StoryJournalUI BuildJournal(GameObject canvasGo)
+        {
+            var jo = Panel(canvasGo.transform, "Journal", new Color(.07f, .06f, .05f, .92f));  Fit(jo, Vector2.zero, Vector2.one, new Vector2(60, 50), new Vector2(-60, -50));
+            var title = MakeText(jo.transform, "Title", "Journal  (J)", 24, TextAnchor.UpperLeft, new Color(1, .9f, .7f));  Fit(title.gameObject, new Vector2(0, 1), new Vector2(1, 1), new Vector2(20, -46), new Vector2(-20, -12)); title.fontStyle = FontStyle.Bold;
+            Text Col(string name, string header, float x0, float x1)
+            {
+                var h = MakeText(jo.transform, name + "H", header, 13, TextAnchor.UpperLeft, new Color(1, .8f, .5f));  Fit(h.gameObject, new Vector2(x0, 1), new Vector2(x1, 1), new Vector2(20, -70), new Vector2(-8, -52));
+                var t = MakeText(jo.transform, name, "", 15, TextAnchor.UpperLeft, Color.white);  Fit(t.gameObject, new Vector2(x0, 0), new Vector2(x1, 1), new Vector2(20, 16), new Vector2(-8, -76)); t.verticalOverflow = VerticalWrapMode.Truncate; t.supportRichText = true; return t;
+            }
+            var people = Col("People", "PEOPLE", 0f, .25f);
+            var places = Col("Places", "PLACES", .25f, .5f);
+            var lore = Col("Lore", "LORE", .5f, .78f);
+            var items = Col("Items", "ITEMS", .78f, 1f);
+            var j = canvasGo.AddComponent<StoryJournalUI>(); j.panel = jo; j.peopleText = people; j.placesText = places; j.loreText = lore; j.itemsText = items;
+            jo.SetActive(false); return j;
         }
         StoryMapUI BuildMap(GameObject canvasGo)
         {

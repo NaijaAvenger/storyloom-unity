@@ -48,6 +48,37 @@ namespace Storyloom
         public IPickupToastUI Toast => Iface<IPickupToastUI>(toastOverride, toast);
         public IInventoryUI Inventory => Iface<IInventoryUI>(inventoryOverride, inventoryHud);
         public bool InventoryOpen => Inventory != null && Inventory.IsOpen;
+        public StoryJournalUI journalUi;             // J: the codex — lore learned, people met, places visited, items held
+        public bool JournalOpen => journalUi && journalUi.IsOpen;
+        /// <summary>Any modal kit panel open (inventory or journal): movement/look pause and the cursor is freed.</summary>
+        public bool UiBusy => InventoryOpen || JournalOpen;
+
+        /// <summary>One line for the HUD: what the player should do next — the gated pending beat first ("Talk to Bram",
+        /// "Go to Lantern Road"), else the first beat that is available right now, else "".</summary>
+        public string ObjectiveText()
+        {
+            if (Runner == null || Story == null || InBeat) return "";
+            var n = Story.GetNode(PendingNodeId);
+            string verb = "Continue";
+            if (n == null)
+            {
+                n = Story.nodes.FirstOrDefault(x => !Played.Contains(x.id) && !x.IsCheck && !x.IsRandom && !x.IsJump && Available(x) && Ok(x)
+                    && (x.IsDiscoverable || x.type == "scene" || x.type == "event" || Involves2(x)));
+                verb = "Find";
+                if (n == null) return "";
+            }
+            var speakers = new List<string>();
+            if (!string.IsNullOrEmpty(n.speakerId)) speakers.Add(n.speakerId);
+            if (n.lines != null) foreach (var l in n.lines) if (!string.IsNullOrEmpty(l.speakerId) && !speakers.Contains(l.speakerId)) speakers.Add(l.speakerId);
+            speakers.RemoveAll(IsPlayer);
+            var loc = Story.GetLocation(n.locationId);
+            string at = loc != null && n.locationId != CurrentLocationId ? " (at " + loc.name + ")" : "";
+            if (n.IsDialogue && speakers.Count > 0) return "→ Talk to " + (Story.GetCharacter(speakers[0])?.name ?? speakers[0]) + at;
+            if (n.IsDiscoverable) return "→ Examine: " + n.title + at;
+            if (loc != null && n.locationId != CurrentLocationId) return "→ Go to " + loc.name;
+            return "→ " + verb + ": " + n.title;
+        }
+        bool Involves2(StoryNode x) => !string.IsNullOrEmpty(x.speakerId) || (x.lines != null && x.lines.Any(l => !string.IsNullOrEmpty(l.speakerId)));
 
         [Header("Behaviour")]
         public bool playStartNodeOnLoad = true;      // play the story's start node when the scene starts
@@ -92,6 +123,7 @@ namespace Storyloom
             if (!inventoryHud) { inventoryHud = FindObjectOfType<InventoryHUD>(true); if (inventoryHud) missing.Add("inventoryHud"); }
             if (!banner) { banner = FindObjectOfType<LocationBanner>(true); if (banner) missing.Add("banner"); }
             if (!map) { map = FindObjectOfType<StoryMapUI>(true); if (map) missing.Add("map"); }
+            if (!journalUi) { journalUi = FindObjectOfType<StoryJournalUI>(true); if (journalUi) missing.Add("journal"); }
             // no built-in widget: adopt any custom implementation living in the scene (a hand-rolled IDialogueUI etc.)
             if (Dialogue == null) { dialogueOverride = FindImplementation<IDialogueUI>(); if (dialogueOverride) missing.Add("dialogue (custom)"); }
             if (Banner == null) { bannerOverride = FindImplementation<ILocationBannerUI>(); if (bannerOverride) missing.Add("banner (custom)"); }
@@ -124,21 +156,58 @@ namespace Storyloom
             if (keys == null) keys = StoryloomKeyBinds.Default();
             if (Story == null) { Debug.LogError("Storyloom: assign a Bindings asset with a Story asset."); return; }
             Runner = new StoryRunner(Story);
-            Runner.OnEvent += (name, n) => OnStoryEvent?.Invoke(name);
-            Runner.OnEnding += n => OnEndingReached?.Invoke(n);
+            WireRunner(Runner);
+            Runner.ResetVariables(); bindings.ApplyStartingValues(Runner);
+        }
+        void WireRunner(StoryRunner r)
+        {
+            r.OnEvent += (name, n) => { Rec("⚡ event: " + name); OnStoryEvent?.Invoke(name); };
+            r.OnEnding += n => OnEndingReached?.Invoke(n);
             // The HUD refresh runs inside GiveItem/TakeItem: an exception in there (a half-built inventory prefab, a missing row)
             // used to unwind through Pickup and the beat coroutine, so the item arrived but the "Got X" toast never fired.
-            Runner.OnVariableChanged += (k, v) =>
+            r.OnVariableChanged += (k, v) =>
             {
+                if (!k.StartsWith("__") && !k.StartsWith(StoryRunner.ItemPrefix)) Rec("· " + k + " = " + v);
                 if (!k.StartsWith(StoryRunner.ItemPrefix)) return;
                 var id = k.Substring(StoryRunner.ItemPrefix.Length);
                 if (v is bool b && b) OnItemGained?.Invoke(id); else OnItemLost?.Invoke(id);
                 var inv = Inventory; if (inv != null) { try { inv.Refresh(); } catch (Exception e) { Debug.LogError("Storyloom: inventory refresh failed — " + e); } }
             };
-            Runner.ResetVariables(); bindings.ApplyStartingValues(Runner);
         }
         /// <summary>Reset variables and apply the editor's starting-value overrides.</summary>
         public void ResetStory() { Runner.ResetVariables(); bindings.ApplyStartingValues(Runner); Played.Clear(); PendingNodeId = ""; TalkVisits.Clear(); SaidBarks.Clear(); }
+
+        // ---- playthrough transcript: the artifact writers review after a session -------------------------------------
+        [Tooltip("Record a screenplay-style transcript of the session (beats, lines, choices, pickups, variable changes). Export it from the Playtest panel.")]
+        public bool recordTranscript = true;
+        /// <summary>The session transcript, oldest first. Written by Rec(); exported from the playtest panel.</summary>
+        public readonly List<string> Transcript = new List<string>();
+        public void Rec(string line) { if (!recordTranscript) return; Transcript.Add($"[{Time.time:0.0}s] {line}"); if (Transcript.Count > 4000) Transcript.RemoveAt(0); }
+
+        // ---- live story hot-reload: swap the story under a running session, keeping all id-keyed state ---------------
+        bool _reloadPending;
+        /// <summary>Reload the story from the (re-imported / live-pulled) story asset without leaving play mode. Variables,
+        /// inventory, played beats, pending node and visit counts survive — everything is id-keyed. Deferred to the end of
+        /// the current beat when one is running.</summary>
+        public void RequestHotReload() { _reloadPending = true; if (!InBeat) DoHotReload(); }
+        void Update() { if (_reloadPending && !InBeat) DoHotReload(); }
+        void DoHotReload()
+        {
+            _reloadPending = false;
+            if (Runner == null || Story == null) return;
+            var snapshot = Runner.SnapshotState();
+            var fresh = new StoryRunner(Story);
+            WireRunner(fresh);
+            fresh.ResetVariables(); bindings.ApplyStartingValues(fresh);
+            fresh.RestoreState(snapshot);       // carries every surviving variable / item / lore / tag / visit flag
+            fresh.MergeNewDefaults();           // variables & items the new story introduced get their defaults
+            Runner = fresh;
+            int dropped = Played.RemoveWhere(id => Story.GetNode(id) == null);
+            if (Story.GetNode(PendingNodeId) == null) PendingNodeId = "";
+            Inventory?.Refresh();
+            Note($"Story hot-reloaded ({Story.nodes?.Length ?? 0} nodes{(dropped > 0 ? $", {dropped} played id(s) no longer exist" : "")})");
+            Rec("↻ story hot-reloaded");
+        }
 
         void Start()
         {
@@ -177,6 +246,7 @@ namespace Storyloom
             // var player = FindObjectOfType<PlayerController2D>();
             if (player && !xz && !player.GetComponent<Collider2D>()) { var pc = player.gameObject.AddComponent<CircleCollider2D>(); if (pc) { pc.radius = .4f; fixedNames.Add(player.name); } }
             if (player && !xz) { var prb = player.GetComponent<Rigidbody2D>(); if (prb) { prb.sleepMode = RigidbodySleepMode2D.NeverSleep; prb.interpolation = RigidbodyInterpolation2D.Interpolate; prb.collisionDetectionMode = CollisionDetectionMode2D.Continuous; } }
+            if (!GetComponent<AmbientBarks>()) gameObject.AddComponent<AmbientBarks>();   // idle lines near NPCs, for scenes generated before 0.10
             // camera driver: a Main Camera without its style's driver plays as a static view while the player walks away
             var mainCam = Camera.main;
             if (player && mainCam)
@@ -245,6 +315,7 @@ namespace Storyloom
                 {
                     TalkVisits[characterId] = visit; if (bark.once) SaidBarks.Add(BarkKey(c, bark));
                     Note($"TalkTo {nm}: idle line (visit {visit}{(bark.conditions != null && bark.conditions.Length > 0 ? ", conditional" : "")}, priority {bark.priority})");
+                    Rec($"{nm} (idle): {bark.text}");
                     Dialogue?.ShowBark(nm, bark.text, Portrait(characterId));
                     return;
                 }
@@ -369,6 +440,7 @@ namespace Storyloom
             History.Add(new BeatRecord { nodeId = first.id, title = string.IsNullOrEmpty(first.title) ? first.id : first.title, stateJson = SaveJson(), time = Time.time });
             if (History.Count > 200) History.RemoveAt(0);
             InBeat = true; if (first.id == PendingNodeId) PendingNodeId = "";
+            { var floc = Story.GetLocation(first.locationId); Rec($"— {(string.IsNullOrEmpty(first.title) ? first.id : first.title)} <{first.type}>{(floc != null ? " @ " + floc.name : "")} —"); }
             bool wasDiscoverable = first.IsDiscoverable; string reward = wasDiscoverable ? RewardSummary(first) : "";
             Runner.GoTo(first.id);
             while (true)
@@ -383,6 +455,7 @@ namespace Storyloom
                     foreach (var l in n.lines)
                     {
                         var c = Story.GetCharacter(l.speakerId);
+                        Rec($"{(c != null ? c.name : "?")}{(string.IsNullOrEmpty(l.emotion) ? "" : " (" + l.emotion + ")")}: {l.text}");
                         yield return dui != null ? dui.Say(c != null ? c.name : "", l.text, Portrait(l.speakerId), l.emotion, Bark(l.speakerId)) : null;
                     }
                 }
@@ -394,7 +467,7 @@ namespace Storyloom
                     if (dui != null) yield return n.IsDialogue && speaker != null ? dui.Say(speaker.name, n.text, Portrait(n.speakerId), "", null) : dui.Narrate(n.title, n.text, n.IsEnding);
                 }
 
-                if (n.IsEnding) { OnBeatFinished?.Invoke(n); break; }
+                if (n.IsEnding) { Rec("◆ ENDING: " + n.title); OnBeatFinished?.Invoke(n); break; }
 
                 // where next
                 StoryOption next = null;
@@ -407,11 +480,12 @@ namespace Storyloom
                     else next = opts.FirstOrDefault(o => !o.locked);
                 }
                 if (next == null) { OnBeatFinished?.Invoke(n); break; }
+                if (n.IsChoice) Rec("▸ chose: " + next.label);
                 var target = next.target;
                 // a discoverable's "back to host" return ends the beat without replaying the host
                 if (next.isReturn) { OnBeatFinished?.Invoke(n); break; }
                 // pause here if the next beat belongs to another character or another place — the world continues it
-                if (Gated(target, out var why)) { PendingNodeId = target.id; if (dui != null && !string.IsNullOrEmpty(why)) yield return dui.Narrate("", "…" + why + ".", false); OnBeatFinished?.Invoke(n); break; }
+                if (Gated(target, out var why)) { PendingNodeId = target.id; Rec("⏸ paused: " + why); if (dui != null && !string.IsNullOrEmpty(why)) yield return dui.Narrate("", "…" + why + ".", false); OnBeatFinished?.Invoke(n); break; }
                 PendingNodeId = "";
                 Runner.Choose(next);
                 // stop at natural pauses: the next beat is a scene at another location (walk there) — Stardew style
@@ -442,6 +516,7 @@ namespace Storyloom
                 var bui = Banner;
                 if (bui != null && loc != null) bui.Show(loc.name, RegionLine(loc), b != null ? b.banner : null, LocationBlurb(loc));
                 Note("Zone: entered " + (loc != null ? loc.name : locationId) + (bui != null ? "" : " (NO BANNER IN SCENE)"));
+                Rec("≡ entered " + (loc != null ? loc.name : locationId));
             }
             else Note("Zone: re-entered " + locationId + " (banner already showing for it)");
             SetLocation(locationId, true);
@@ -497,6 +572,7 @@ namespace Storyloom
             if (Toast == null) ResolveUI();
             var tui = Toast;
             Note($"Pickup {it.name}: gave item, toast {(tui != null ? "shown" : "MISSING")}, owned now {Runner.Inventory().Count()}");
+            Rec("+ got " + it.name);
             tui?.Show($"Got {it.name}", b != null ? b.icon : null);
         }
 

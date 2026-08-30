@@ -56,7 +56,7 @@ namespace Storyloom
         {
             if (!target) { var p = StoryloomPlayer.Current; if (p) target = p.transform; else return; }
             if (!keys) { var p = StoryloomPlayer.Current; if (p) keys = p.keys; }
-            var d = StoryloomDirector.Instance; bool busy = (d && d.InBeat) || (d && d.InventoryOpen);
+            var d = StoryloomDirector.Instance; bool busy = (d && d.InBeat) || (d && d.UiBusy);
             // mouse turns the camera whenever the game is free-roaming (the CursorLock component locks the pointer; in the editor the
             // first click into the Game view grabs it — but look works even unlocked so the camera is never just frozen)
             if (keys && !busy) { var look = keys.LookAxis() * lookScale; _yaw += look.x; _pitch = Mathf.Clamp(_pitch - look.y, minPitch, maxPitch); }

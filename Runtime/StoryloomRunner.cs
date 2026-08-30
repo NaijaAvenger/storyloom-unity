@@ -242,6 +242,18 @@ namespace Storyloom
             Variables[CurrentLocKey] = ""; Variables[CurrentRegionKey] = "";
         }
 
+        /// <summary>After a hot-reload: give variables, items, lore and tags the *new* story introduced their default values,
+        /// without touching anything the restored state already carries.</summary>
+        public void MergeNewDefaults()
+        {
+            foreach (var v in _varDecl.Values) if (!Variables.ContainsKey(v.name)) Variables[v.name] = Coerce(v, v.defaultValue);
+            if (Story.items != null) foreach (var it in Story.items) if (!Variables.ContainsKey(ItemPrefix + it.id)) Variables[ItemPrefix + it.id] = it.startOwned;
+            if (Story.lore != null) foreach (var l in Story.lore) if (!Variables.ContainsKey(LorePrefix + l.id)) Variables[LorePrefix + l.id] = false;
+            if (Story.behaviorTags != null) foreach (var t in Story.behaviorTags) if (!Variables.ContainsKey(TagPrefix + t.id)) Variables[TagPrefix + t.id] = t.startsOn;
+            if (!Variables.ContainsKey(CurrentLocKey)) Variables[CurrentLocKey] = "";
+            if (!Variables.ContainsKey(CurrentRegionKey)) Variables[CurrentRegionKey] = "";
+        }
+
         /// <summary>Mark a location (and its region chain) as current + visited. The kit's director calls this from SetLocation.</summary>
         public void VisitLocation(string locId)
         {
