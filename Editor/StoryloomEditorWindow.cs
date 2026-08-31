@@ -547,16 +547,37 @@ namespace Storyloom.EditorTools
         void GenerateEntityAssets()
         {
             var s = _b.story.Story; var root = Root + "/Entities"; int created = 0, updated = 0;
+            AssetDatabase.SaveAssets();                     // anything created earlier in this batch is on disk before we look
+            var all = AllEntityAssets();
+            // duplicates from earlier generations (the old type-index lookup could miss existing assets): same entity, several
+            // files. Ask once, keep the earliest file per entity, delete the extras — references to a deleted duplicate come
+            // back on the next scene repair via the id stamp.
+            var dupGroups = all.GroupBy(a => a.GetType().Name + ":" + (a.entityId ?? "")).Where(g => g.Count() > 1).ToList();
+            if (dupGroups.Count > 0)
+            {
+                int extras = dupGroups.Sum(g => g.Count() - 1);
+                if (EditorUtility.DisplayDialog("Duplicate entity assets",
+                    $"{extras} duplicate entity asset file(s) found — the same entity exists as several files (left behind by earlier generations).\n\nDelete the extras? One file per entity is kept with all its references; anything that referenced a deleted duplicate is re-stamped from its id on the next scene generation or repair.",
+                    "Delete extras", "Keep them"))
+                {
+                    foreach (var g in dupGroups)
+                    {
+                        // keep the shortest path ("Character.asset" over "Character 1.asset"), ties by name
+                        var keep = g.OrderBy(a => AssetDatabase.GetAssetPath(a).Length).ThenBy(a => a.name, System.StringComparer.Ordinal).First();
+                        foreach (var extra in g.Where(a => a != keep))
+                        { Debug.Log($"Storyloom: deleting duplicate entity asset '{AssetDatabase.GetAssetPath(extra)}' (kept '{AssetDatabase.GetAssetPath(keep)}')"); AssetDatabase.DeleteAsset(AssetDatabase.GetAssetPath(extra)); all.Remove(extra); }
+                    }
+                }
+            }
             T Ensure<T>(string folder, string id, string nm) where T : StoryloomEntityAsset
             {
                 Directory.CreateDirectory($"{root}/{folder}");
-                var existing = AssetDatabase.FindAssets("t:" + typeof(T).Name, new[] { root })
-                    .Select(g => AssetDatabase.LoadAssetAtPath<T>(AssetDatabase.GUIDToAssetPath(g)))
-                    .FirstOrDefault(a => a && a.entityId == id);
+                var existing = all.OfType<T>().FirstOrDefault(a => a && a.entityId == id);
                 if (existing == null)
                 {
                     existing = CreateInstance<T>(); existing.entityId = id;
                     AssetDatabase.CreateAsset(existing, AssetDatabase.GenerateUniqueAssetPath($"{root}/{folder}/{SafeFileName(nm)}.asset")); created++;
+                    all.Add(existing);                     // visible to the rest of this run, no index round-trip needed
                 }
                 else updated++;
                 existing.story = _b.story; existing.bindings = _b;
@@ -630,16 +651,23 @@ namespace Storyloom.EditorTools
             return sb.ToString();
         }
 
-        /// <summary>Every generated entity asset, keyed by "TypeName:entityId". Empty when none have been generated yet.</summary>
+        /// <summary>Every entity asset file under Entities/, loaded by walking the filesystem — NOT AssetDatabase.FindAssets,
+        /// whose type index can lag right after batch operations (scene/prefab generation) and miss just-created assets;
+        /// that miss is what made "Generate entity assets" mint duplicates ("Character 1.asset") next to the originals.</summary>
+        internal static List<StoryloomEntityAsset> AllEntityAssets()
+        {
+            var list = new List<StoryloomEntityAsset>();
+            var root = Root + "/Entities";
+            if (!AssetDatabase.IsValidFolder(root)) return list;
+            foreach (var f in Directory.GetFiles(root, "*.asset", SearchOption.AllDirectories))
+            { var a = AssetDatabase.LoadAssetAtPath<StoryloomEntityAsset>(f.Replace('\\', '/')); if (a) list.Add(a); }
+            return list;
+        }
+        /// <summary>Every generated entity asset, keyed by "TypeName:entityId" (first file wins when duplicates exist). Empty when none have been generated yet.</summary>
         internal static Dictionary<string, StoryloomEntityAsset> LoadEntityAssets()
         {
             var map = new Dictionary<string, StoryloomEntityAsset>();
-            if (!AssetDatabase.IsValidFolder(Root + "/Entities")) return map;
-            foreach (var g in AssetDatabase.FindAssets("t:StoryloomEntityAsset", new[] { Root + "/Entities" }))
-            {
-                var a = AssetDatabase.LoadAssetAtPath<StoryloomEntityAsset>(AssetDatabase.GUIDToAssetPath(g));
-                if (a) map[a.GetType().Name + ":" + a.entityId] = a;
-            }
+            foreach (var a in AllEntityAssets()) { var k = a.GetType().Name + ":" + a.entityId; if (!map.ContainsKey(k)) map[k] = a; }
             return map;
         }
         /// <summary>Fill the empty asset fields on every interactable / zone in the open scene from their id strings, so generated

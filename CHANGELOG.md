@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.10.1
+- **Entity assets no longer duplicate.** “Generate entity assets” looked up existing assets through AssetDatabase’s type index, which can lag right after batch operations (scene/prefab generation) — the miss minted “Character 1.asset” beside the original. Lookups now walk the Entities folder on disk (Generate, the Entities tab, scene stamping and anchors all share the path), a SaveAssets runs before searching, and assets created during a run are tracked in memory. Existing duplicates are detected at the next Generate and, with one approval dialog, the extras are deleted — one file per entity kept with its references; anything that pointed at a deleted duplicate is re-stamped from its id on the next scene generation or repair.
+
 ## 0.10.0
 - **Playthrough transcripts**: the director records a screenplay-style transcript (beats, every line, choices picked, pickups, zone entries, variable changes, events, endings, rewinds and hot-reloads). The Playtest panel shows the tail live and exports it — Copy / Save… (.md) / Clear — with a record toggle on the director.
 - **Live re-import during play**: a live-link pull while playing hot-swaps the running story — variables, inventory, played beats, pending node and visit counts survive (all id-keyed; new variables/items get their defaults via StoryRunner.MergeNewDefaults, ids that vanished are pruned and reported). Deferred to the end of the current beat. Manual trigger: “Hot-reload story” on the Playtest panel.
